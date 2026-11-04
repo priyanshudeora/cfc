@@ -1,0 +1,31 @@
+# Local Python environments and caches
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Credentials: only the blank example belongs in the repository
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# User uploads, checkpoints, local voice models and generated media
+/data/
+/tmp/
+/outputs/
+*.log
+
+# Earlier notebook experiments and supplied branded reference assets stay local
+/video_agent.ipynb
+/api_checks.ipynb
+/assets/airdopes_141/
+
+# Machine-specific editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

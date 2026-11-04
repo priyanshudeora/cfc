@@ -1,0 +1,11 @@
+# Shared planning, validation, image, audio and video dependencies.
+-r requirements.txt
+
+# Python 3.14-compatible local speech and WAV audio support.
+-r requirements-tts.txt
+
+# Browser frontend, forms, video playback, navigation and background progress UI.
+streamlit>=1.66,<2
+
+# Renders the actual approval-workflow graph in the Architecture page.
+graphviz>=0.20,<1

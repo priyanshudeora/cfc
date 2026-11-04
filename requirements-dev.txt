@@ -1,0 +1,6 @@
+# Test backend approval gates, rendering adapters and the Streamlit UI.
+-r requirements-app.txt
+pytest>=9,<10
+
+# Formats the application modules and checks for undefined names.
+ruff>=0.14,<1

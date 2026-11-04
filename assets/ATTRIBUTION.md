@@ -1,0 +1,1 @@
+`coverr-logo.svg` is the official dark logo linked by [Coverr's API documentation](https://api.coverr.co/docs), retrieved from its public logo asset. The API connections screen displays it with a link to [Coverr](https://coverr.co) when Coverr responses are shown.

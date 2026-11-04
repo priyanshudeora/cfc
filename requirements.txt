@@ -1,0 +1,26 @@
+# Builds the agent workflow, connects steps, and pauses for human approval.
+langgraph>=1.2,<2
+
+# Saves LangGraph approval checkpoints so a campaign can resume after a kernel restart.
+langgraph-checkpoint-sqlite>=3.1,<4
+
+# Validates the scene plans returned by Gemini before rendering.
+pydantic>=2,<3
+
+# Calls Gemini, ElevenLabs TTS, Tavily, and Coverr through HTTP and downloads media.
+requests>=2.32,<3
+
+# Prepares product images and draws text and captions on video frames.
+Pillow>=11,<14
+
+# Provides an FFmpeg executable for combining images, clips, and audio into MP4s.
+imageio-ffmpeg>=0.6,<1
+
+# Draws animated frame gradients and synthesizes/mixes the original music bed.
+numpy>=2,<3
+
+# Loads API keys from the local .env file into Python.
+python-dotenv>=1,<2
+
+# Provides the Python kernel that runs code cells in Jupyter and VS Code notebooks.
+ipykernel>=6,<8

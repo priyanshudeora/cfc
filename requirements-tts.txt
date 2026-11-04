@@ -1,0 +1,11 @@
+# Local voice dependencies for the Python 3.14.7 notebook environment (.venv).
+# The upstream kokoro-onnx 0.6.1 package requires Python <3.14.
+# This MIT-licensed Python 3.14 fork retains local Kokoro inference and the same API.
+# Pin the reviewed source commit and archive checksum for repeatable installation.
+kokoro-onnx @ https://github.com/dayour/kokoro-onnx/archive/40906b172c7cecff3713f8ecae2e5c9a12687717.zip#sha256=9bca56aaa4064c874208029bfe58ad9458f8d2f8df2d8a41f0d928b5a8542160
+
+# CPU inference runtime with native Windows Python 3.14 wheels.
+onnxruntime>=1.30,<2
+
+# Saves the generated speech as PCM WAV files for FFmpeg.
+soundfile==0.14.0

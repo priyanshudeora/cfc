@@ -1,0 +1,6 @@
+# Complete Python 3.14.7 notebook environment: agent, rendering, local voice and notebook UI.
+-r requirements.txt
+-r requirements-tts.txt
+
+# Buttons, progress bars, feedback boxes and video review inside Jupyter.
+ipywidgets>=8.1,<9
