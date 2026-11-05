@@ -7,6 +7,7 @@ import soundfile as sf
 import imageio_ffmpeg
 from ..config import *
 from ..storage import save_json
+from ..storage import digest
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -61,16 +62,54 @@ class AudioMixin:
             for index, scene in enumerate(ad["scenes"]):
                 path = folder / f"voice-raw-{index}.wav"
                 spoken = self.spoken_text(scene["narration"])
-                if not path.exists():
+
+                def synthesize(destination):
+                    output = destination / "speech.wav"
                     samples, rate = engine.create(
                         spoken,
                         voice=self.voice_id,
                         speed=self.voice_speed,
                         lang="en-us",
                     )
-                    sf.write(path, samples, rate, subtype="PCM_16")
+                    sf.write(output, samples, rate, subtype="PCM_16")
+                    return dict(path=str(output), _files=[output])
+
+                def verify(result):
+                    info = sf.info(result["path"])
+                    if info.samplerate != AUDIO_SR or info.frames == 0:
+                        raise ValueError("Cached speech is invalid.")
+
+                key = digest(
+                    [
+                        "speech-v2",
+                        spoken,
+                        self.voice_backend,
+                        self.voice_id,
+                        self.voice_speed,
+                        self.brief.get("voice_model")
+                        or self.keys.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+                        if self.voice_backend == "elevenlabs"
+                        else getattr(self, "voice_model_hash", "kokoro-v1.0-int8"),
+                        "en-us",
+                    ]
+                )
+                result, hit = self.media_cache.run(
+                    "speech",
+                    key,
+                    synthesize,
+                    verify,
+                    {"speech_characters": len(spoken)}
+                    if self.voice_backend == "elevenlabs"
+                    else {},
+                    external=self.voice_backend == "elevenlabs",
+                )
+                path = Path(result["path"])
                 samples, rate = sf.read(path)
-                if rate != AUDIO_SR or len(samples) == 0:
+                if (
+                    rate != AUDIO_SR
+                    or len(samples) == 0
+                    or not np.isfinite(samples).all()
+                ):
                     raise RuntimeError("Invalid local speech output")
                 results.append(
                     dict(
@@ -187,12 +226,15 @@ class AudioMixin:
 
     def make_music(self, folder, ad):
         music = np.zeros(20 * AUDIO_SR, dtype=np.float64)
-        bpm = {
-            "product_demo": 108,
-            "student_commute": 100,
-            "lifestyle_story": 100,
-            "product_reveal": 112,
-        }[ad["video_type"]]
+        bpm = (
+            ad.get("audio", {}).get("bpm")
+            or {
+                "product_demo": 108,
+                "student_commute": 100,
+                "lifestyle_story": 100,
+                "product_reveal": 112,
+            }[ad["video_type"]]
+        )
         rng, beat = (np.random.default_rng(141 + bpm - 108), 60 / bpm)
         notes = [261.63, 329.63, 392.0, 329.63, 293.66, 392.0, 440.0, 392.0]
         for index, start in enumerate(np.arange(0, 20, beat)):
@@ -221,27 +263,6 @@ class AudioMixin:
             ),
         )
         return stereo
-
-    def mix_audio(self, folder, cues, ad):
-        voice, rate = self.read_pcm(folder / "voice.wav")
-        voice = voice[: 20 * AUDIO_SR]
-        if len(voice) < 20 * AUDIO_SR:
-            voice = np.pad(voice, ((0, 20 * AUDIO_SR - len(voice)), (0, 0)))
-        music = self.make_music(folder, ad)
-        gain = np.full(len(voice), 0.42)
-        for cue in cues:
-            start, end = (
-                max(0, int((cue["start"] - 0.12) * rate)),
-                min(len(gain), int((cue["end"] + 0.15) * rate)),
-            )
-            gain[start:end] = 0.18
-        gain = np.convolve(
-            np.pad(gain, (1200, 1200), mode="edge"), np.ones(2401) / 2401, mode="valid"
-        )
-        mixed = voice + music * gain[:, None]
-        mixed *= min(1.0, 0.94 / np.max(np.abs(mixed)))
-        self.write_pcm(folder / "mix.wav", mixed)
-        self.note("Original music mixed under speech, with fades and voice ducking.")
 
     def subtitle_time(self, seconds, separator=","):
         millis = round(seconds * 1000)

@@ -9,6 +9,7 @@ from video_agent.ui import (
     download,
     review_toolbar,
     footage_upload,
+    usage_panel,
 )
 
 api, cid = service(), current_campaign()
@@ -16,6 +17,19 @@ snapshot = api.snapshot(cid)
 state, token = snapshot["state"], snapshot["signature"]
 stage_banner(snapshot)
 activity(cid)
+usage_panel(snapshot)
+if state.get("prior_outputs"):
+    with st.expander("Earlier output versions"):
+        for index, previous in enumerate(state["prior_outputs"]):
+            st.caption(
+                f"Version {previous.get('version', '?')} · {previous.get('title', 'Video')}"
+            )
+            download(
+                "Download earlier MP4",
+                previous["video"],
+                key=f"prior_{cid}_{index}",
+                mime="video/mp4",
+            )
 outputs = state.get("outputs") or ([state["sample"]] if state.get("sample") else [])
 if not outputs:
     st.info(
@@ -55,21 +69,30 @@ else:
             st.markdown(
                 "**This is the representative sample.** Your approval unlocks the remaining two videos."
             )
+            reviewed = st.checkbox(
+                "I reviewed the actual product appearance, caption readability, pronunciation and music balance",
+                key="media_checked_" + token,
+            )
             if st.button(
                 "Approve sample",
                 type="primary",
                 key="approve_sample_" + token,
-                disabled=snapshot["busy"] or not snapshot["approved"],
+                disabled=snapshot["busy"] or not snapshot["approved"] or not reviewed,
                 width="stretch",
                 icon=":material/task_alt:",
             ):
                 action(api, cid, "approve", snapshot)
         if snapshot["stage"] == "approve_final":
+            final_checked = st.checkbox(
+                "I reviewed all selected output versions", key="final_checked_" + token
+            )
             if st.button(
                 "Approve final videos",
                 type="primary",
                 key="approve_final_" + token,
-                disabled=snapshot["busy"] or not snapshot["approved"],
+                disabled=snapshot["busy"]
+                or not snapshot["approved"]
+                or not final_checked,
                 width="stretch",
                 icon=":material/task_alt:",
             ):
@@ -86,6 +109,11 @@ else:
             st.caption(result.get("quality_check", "Saved preview"))
             if result.get("quality"):
                 st.json(result["quality"])
+            if Path(result.get("contact_sheet", "")).is_file():
+                st.image(
+                    result["contact_sheet"],
+                    alt="Frames extracted from the actual rendered video for human review",
+                )
         download(
             "Download MP4 preview",
             result["video"],

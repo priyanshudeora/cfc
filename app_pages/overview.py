@@ -73,15 +73,21 @@ with right:
             alt="Current product demonstration sample",
         )
     else:
-        st.image(
-            next(
-                a["path"]
-                for a in api.repository.assets(cid).values()
-                if a["use"] == "identity"
-            ),
-            width=360,
-            alt="Supplied product image for the current campaign",
-        )
-        st.caption("The supplied product image is the visual source of truth.")
+        images = [
+            a["path"]
+            for a in api.repository.assets(cid).values()
+            if a["use"] == "identity"
+        ]
+        if images:
+            st.image(
+                images[0],
+                width=360,
+                alt="Supplied product image for the current campaign",
+            )
+            st.caption("The supplied product image is the visual source of truth.")
+        else:
+            st.info(
+                "Plan with the available context, then add product identity images in Campaign brief before generation."
+            )
 
 activity(cid)

@@ -89,9 +89,9 @@ def build_brief(
     )
 
 
-def prepare_images(main, detail=None, references=()):
+def prepare_images(main, detail=None, references=(), allow_incomplete=False):
     """Validate everything before creating campaign files. Preserve original image bytes."""
-    if not main:
+    if not main and not allow_incomplete:
         raise ValueError("Upload a main product image to create a campaign.")
     references = list(references or [])
     if len(references) > 5:
@@ -102,6 +102,8 @@ def prepare_images(main, detail=None, references=()):
         ("product_detail", detail or main, "identity"),
         *[(f"style_{i}", item, "style_only") for i, item in enumerate(references, 1)],
     ]:
+        if upload is None:
+            continue
         name, content = upload
         if not isinstance(content, bytes) or not 0 < len(content) <= 20 * 1024 * 1024:
             raise ValueError(
@@ -266,7 +268,20 @@ def template_plan(brief):
                 scenes=scenes,
             )
         )
-    return dict(
+    from .models import CampaignPlan
+
+    result = dict(
         summary=f"Three distinct {brief['product']} concepts for {brief['audience']}. Review this local starting draft before creating media.",
         ads=ads,
     )
+    for ad in result["ads"]:
+        ad["audio"] = {
+            "bpm": 100
+            if ad["video_type"] == "lifestyle_story"
+            else 112
+            if ad["video_type"] == "product_reveal"
+            else 108
+        }
+        if ad["video_type"] == "product_reveal":
+            ad["scenes"][0]["edit"] = {"mask": "wipe_left"}
+    return CampaignPlan.model_validate(result).model_dump()

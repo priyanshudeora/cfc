@@ -110,6 +110,15 @@ def activity(cid):
         st.rerun()
     if job["status"] == "running":
         st.progress(job["progress"], text=job["title"])
+        if cid != "api-diagnostics" and st.button(
+            "Stop queued and future work",
+            key="stop_job_" + job["id"],
+            icon=":material/stop_circle:",
+        ):
+            api.stop_work(cid)
+            st.info(
+                "Cancellation requested. Already running provider work may finish; no new work will be submitted."
+            )
     if job["status"] in ["failed", "interrupted"]:
         st.error(job["error"], title="The job stopped", icon=":material/error:")
     with st.expander("Activity · " + job["title"], expanded=job["status"] == "running"):
@@ -119,6 +128,48 @@ def activity(cid):
             st.caption("Starting the background worker…")
     if job["status"] in ["failed", "interrupted"] and cid != "api-diagnostics":
         snap = api.snapshot(cid)
+        if st.button(
+            "Resume future work after cancellation",
+            key="resume_future_" + cid,
+            disabled=snap["busy"],
+        ):
+            try:
+                api.resume_work(cid)
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.success(
+                    "Future work enabled. Retry the interrupted step when ready."
+                )
+        unknown = [
+            task
+            for task in snap.get("tasks", [])
+            if task["status"] in ["unknown", "submitting"]
+        ]
+        if unknown:
+            with st.expander("Reconcile unknown provider submissions"):
+                selected = st.selectbox(
+                    "Task",
+                    [task["key"] for task in unknown],
+                    key="reconcile_task_" + cid,
+                )
+                checked = st.checkbox(
+                    "I checked the provider queue/history or account usage",
+                    key="checked_provider_" + cid,
+                )
+                not_submitted = st.checkbox(
+                    "The provider confirms this request was not submitted/charged",
+                    key="not_submitted_" + cid,
+                )
+                if st.button(
+                    "Record outcome and permit bounded recovery",
+                    key="reconcile_" + cid,
+                    disabled=not checked or snap["busy"],
+                ):
+                    try:
+                        st.info(api.reconcile_unknown(cid, selected, not_submitted))
+                    except (ValueError, RuntimeError) as error:
+                        st.error(str(error))
         if not snap["interrupted"] and snap["stage"]:
             if st.button(
                 "Retry interrupted step", key="retry_" + cid, icon=":material/refresh:"
@@ -236,3 +287,136 @@ def footage_upload(api, cid, snapshot):
                 icon=":material/play_arrow:",
             ):
                 action(api, cid, "continue", snapshot)
+
+
+def usage_panel(snapshot):
+    st.caption("Media estimate: " + str(snapshot.get("estimate", {})))
+    if snapshot.get("usage") or snapshot.get("tasks"):
+        with st.expander("Usage, reservations and durable tasks"):
+            st.json(
+                dict(usage=snapshot.get("usage", []), tasks=snapshot.get("tasks", []))
+            )
+
+
+def fact_review_panel(api, cid, snapshot):
+    path = api.repository.folder(cid) / "pending_facts.json"
+    if not path.exists():
+        return
+    from .storage import read_json
+
+    pending = read_json(path)
+    from .storage import digest
+
+    review_key = cid + "_" + digest(pending) + "_" + snapshot["signature"]
+    with st.container(border=True):
+        st.warning(
+            "The proposed draft contains new or uncertain statements. Verify them before approving them as product facts.",
+            title="Separate fact review required",
+        )
+        st.json(pending.get("issues", []))
+        with st.expander("Full proposed draft for fact review"):
+            st.json(pending.get("plan", {}))
+        if st.checkbox(
+            "I verified these statements and authorize them as product facts",
+            key="confirm_facts_" + review_key,
+        ):
+            if st.button(
+                "Approve facts and save draft",
+                key="approve_facts_" + review_key,
+                disabled=snapshot["busy"],
+            ):
+                try:
+                    api.approve_pending_facts(cid, snapshot["signature"])
+                except (ValueError, RuntimeError) as error:
+                    st.error(str(error))
+                else:
+                    st.rerun()
+
+
+def input_panel(api, cid, snapshot):
+    with st.expander("Reference text, images, video or speech"):
+        st.caption(
+            "Inputs are saved as context. Reference videos provide extracted frames and an optional transcript; they do not automatically become lifestyle footage or approved facts."
+        )
+        kind = st.selectbox(
+            "Input type",
+            ["text", "image", "video", "audio"],
+            key="reference_kind_" + cid,
+        )
+        upload = st.file_uploader("Reference file", key="reference_input_" + cid)
+        recording = st.audio_input(
+            "Or record a spoken brief",
+            key="recording_" + cid,
+            disabled=snapshot["busy"],
+        )
+        text = st.text_area(
+            "Text context or manual transcript",
+            key="input_text_" + cid,
+            max_chars=20000,
+        )
+        if st.button(
+            "Analyze and save input",
+            key="analyze_input_" + cid,
+            disabled=snapshot["busy"] or not (upload or recording or text.strip()),
+        ):
+            try:
+                if recording:
+                    api.add_input(
+                        cid,
+                        "recording.wav",
+                        recording.getvalue(),
+                        "audio",
+                        snapshot["signature"],
+                    )
+                elif upload:
+                    api.add_input(
+                        cid, upload.name, upload.getvalue(), kind, snapshot["signature"]
+                    )
+                else:
+                    api.add_input(
+                        cid,
+                        "reference.txt",
+                        text.encode(),
+                        "text",
+                        snapshot["signature"],
+                    )
+            except (ValueError, RuntimeError) as error:
+                st.error(str(error))
+            else:
+                st.rerun()
+        for analysis in snapshot["state"].get("brief", {}).get("input_analysis", []):
+            st.json(
+                {k: v for k, v in analysis.items() if k not in ["source", "frames"]}
+            )
+            for frame in analysis.get("frames", [])[:4]:
+                if Path(frame).is_file():
+                    st.image(
+                        frame, width=180, alt="Extracted reference frame for planning"
+                    )
+    with st.expander("Add or replace product identity images"):
+        main = st.file_uploader(
+            "Main image to use in the next plan",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="replacement_main_" + cid,
+        )
+        detail = st.file_uploader(
+            "Optional second product view",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="replacement_detail_" + cid,
+        )
+        if st.button(
+            "Save product images and reopen approval",
+            key="replace_images_" + cid,
+            disabled=snapshot["busy"] or not main,
+        ):
+            try:
+                api.add_product_images(
+                    cid,
+                    (main.name, main.getvalue()),
+                    (detail.name, detail.getvalue()) if detail else None,
+                    snapshot["signature"],
+                )
+            except (ValueError, RuntimeError) as error:
+                st.error(str(error))
+            else:
+                st.rerun()

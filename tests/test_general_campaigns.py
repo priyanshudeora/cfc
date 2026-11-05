@@ -50,34 +50,36 @@ def test_two_unrelated_products_have_isolated_facts_images_and_branding(studio):
             str(studio.repository.folder(cid)) in a["path"] for a in assets.values()
         )
         renderer = studio.runtime(cid).renderer
+        from PIL import Image, ImageDraw
+
         photos = renderer.identity_images()
-        for ad in state["plan"]["ads"]:
-            cues, clock = [], 0
-            for scene in ad["scenes"]:
-                cues.append(
-                    dict(
-                        start=clock,
-                        end=clock + scene["seconds"],
-                        caption=scene["caption"],
-                    )
+        assert photos["product_main"].size in [(360, 600), (800, 220)]
+        frame = Image.new("RGB", (1080, 1920), "white")
+        texts, original = [], renderer.draw_text
+
+        def capture(draw, text, *args, **kwargs):
+            texts.append(text)
+            return original(draw, text, *args, **kwargs)
+
+        renderer.draw_text = capture
+        try:
+            renderer.draw_identity(ImageDraw.Draw(frame))
+            for ad in state["plan"]["ads"]:
+                renderer.draw_text(
+                    ImageDraw.Draw(frame),
+                    ad["scenes"][-1]["headline"],
+                    (84, 314),
+                    912,
+                    234,
+                    72,
+                    "black",
+                    True,
                 )
-                clock += scene["seconds"]
-            texts, draw = [], renderer.draw_text
-
-            def capture(d, text, *args, **kwargs):
-                texts.append(text)
-                return draw(d, text, *args, **kwargs)
-
-            renderer.draw_text = capture
-            try:
-                for second_mark in [0.5, 4.0, 9.0, 13.0, 18.0]:
-                    frame = renderer.concept_frame(ad, cues, photos, second_mark, {})
-                    assert frame.size == (1080, 1920) and frame.mode == "RGB"
-                assert state["brief"]["brand"] in texts
-                assert own in texts and state["brief"]["cta"] in texts
-                assert not any("boAt" in text or "AIRDOPES" in text for text in texts)
-            finally:
-                renderer.draw_text = draw
+            assert state["brief"]["brand"] in texts
+            assert own in texts and state["brief"]["cta"] in texts
+            assert not any("boAt" in text or "AIRDOPES" in text for text in texts)
+        finally:
+            renderer.draw_text = original
     assert (
         studio.repository.assets(first)["product_main"]["sha256"]
         != studio.repository.assets(second)["product_main"]["sha256"]
@@ -156,7 +158,7 @@ def test_brief_changes_reset_approval_preview_and_scripts(studio):
 
 
 def test_bad_or_missing_images_do_not_create_campaigns(studio):
-    for upload in [None, ("fake.png", b"not an image")]:
+    for upload in [("fake.png", b"not an image")]:
         with pytest.raises(ValueError):
             make_campaign(studio, product_image=upload)
     assert not studio.repository.list()

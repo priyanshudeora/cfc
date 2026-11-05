@@ -5,11 +5,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import threading
 import uuid
+import requests
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 from .config import Settings, ROOT, LEGACY_DIR, LEGACY_ID
 from .campaigns import build_brief, prepare_images, store_images, template_plan
-from .storage import Repository, read_json, save_json, signature, reset_approval
+from .storage import (
+    Repository,
+    read_json,
+    save_json,
+    signature,
+    reset_approval,
+    review_content,
+)
+from .control import DEFAULT_LIMITS
+from .timeline import ad_key, revise_timeline
+from .usage import limits_for, estimate, rates_for
 from .workflow import CampaignRuntime, CampaignState
 from .jobs import JobManager
 from .connections import check_provider, redact, PROVIDERS
@@ -62,14 +73,104 @@ class CampaignService:
             approved = True
         except (ValueError, KeyError, OSError):
             approved = False
+        stage = snapshot.next[0] if snapshot.next else ""
+        review_id = ""
+        if state.get("plan") and snapshot.interrupts and not self.jobs.busy(cid):
+            actions = {
+                "approve_plan": ["approve", "revise_plan", "reopen_plan", "cancel"],
+                "ready_sample": ["generate", "revise_plan", "reopen_plan", "cancel"],
+                "approve_sample": [
+                    "approve",
+                    "revise",
+                    "revise_plan",
+                    "reopen_plan",
+                    "cancel",
+                ],
+                "approve_final": [
+                    "approve",
+                    "revise",
+                    "revise_plan",
+                    "reopen_plan",
+                    "cancel",
+                ],
+                "prepare_assets": ["continue", "cancel"],
+            }.get(stage, [])
+            ads = state["plan"]["ads"]
+            scoped_ads = (
+                ads[:1]
+                if stage in ["approve_plan", "ready_sample"]
+                else ads[1:]
+                if stage in ["approve_sample", "prepare_assets"]
+                else ads
+            )
+            scope = dict(
+                plan=signature(state),
+                ads=[ad_key(ad, state["brief"]) for ad in scoped_ads],
+                limits=state["brief"].get("limits", DEFAULT_LIMITS),
+                outputs=review_content(state, stage)["outputs"],
+            )
+            review_id = self.repository.control.issue(
+                cid,
+                stage,
+                snapshot.config["configurable"]["checkpoint_id"],
+                review_content(state, stage),
+                actions,
+                scope,
+            )
         return dict(
             state=state,
-            stage=snapshot.next[0] if snapshot.next else "",
+            stage=stage,
             interrupted=bool(snapshot.interrupts),
             approved=approved,
             busy=self.jobs.busy(cid),
-            signature=signature(state) if state.get("plan") else "",
+            signature=review_id,
+            review_id=review_id,
+            checkpoint=snapshot.config["configurable"].get("checkpoint_id", "")
+            if snapshot.config
+            else "",
+            plan_signature=signature(state) if state.get("plan") else "",
+            tasks=self.repository.control.tasks(cid),
+            usage=self.repository.control.usage(cid),
+            estimate=estimate(
+                state["brief"],
+                state["plan"]["ads"][:1]
+                if stage in ["approve_plan", "ready_sample"]
+                else state["plan"]["ads"][1:],
+            )
+            if state.get("plan")
+            else {},
+            missing_assets=self.missing_assets(
+                cid,
+                state["plan"]["ads"][:1]
+                if stage in ["approve_plan", "ready_sample"]
+                else state["plan"]["ads"],
+            )
+            if state.get("plan")
+            else [],
             job=self.jobs.get(cid),
+        )
+
+    def missing_assets(self, cid, ads):
+        runtime = self.runtime(cid)
+        footage = (
+            read_json(runtime.renderer.commute_config)
+            if runtime.renderer.commute_config.exists()
+            else {}
+        )
+        required = {
+            key
+            for ad in ads
+            for scene in ad["scenes"]
+            if scene.get("edit", {}).get("mode", "reused") in ["reused", "hybrid"]
+            for key in scene["asset_ids"]
+        }
+        return sorted(
+            key
+            for key in required
+            if not Path(
+                footage.get(key)
+                or runtime.renderer.assets.get(key, {}).get("path", "__missing__")
+            ).is_file()
         )
 
     def create(
@@ -95,9 +196,26 @@ class CampaignService:
         product_image=None,
         detail_image=None,
         style_images=(),
+        limits=None,
+        model="gemini-2.5-flash",
+        allow_incomplete=True,
+        usage_rates=None,
     ):
         if not name.strip() or not audience.strip() or not goal.strip():
             raise ValueError("Add a campaign name, audience and goal.")
+        if not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", model):
+            raise ValueError("Use a valid Gemini planning model ID.")
+        usage_rates = rates_for(usage_rates)
+        if usage_rates and (
+            set(usage_rates) - {"model_tokens", "speech_characters", "generation_jobs"}
+            or any(
+                not isinstance(v, (int, float)) or not 0 <= v <= 1_000_000_000
+                for v in usage_rates.values()
+            )
+        ):
+            raise ValueError(
+                "Use nonnegative finite unit prices in micro USD per unit."
+            )
         if voice_backend not in ["local_kokoro_notebook", "elevenlabs"]:
             raise ValueError("Unknown voice provider.")
         if voice_backend == "elevenlabs" and (
@@ -131,10 +249,21 @@ class CampaignService:
             voice_backend=voice_backend,
             voice_id=voice_id.strip(),
             refresh_research=bool(refresh_research),
+            limits=limits_for(limits),
+            planning_model=model,
+            usage_rates=usage_rates or {},
+            voice_model=self.settings.keys(self.secrets).get("ELEVENLABS_MODEL")
+            or "eleven_multilingual_v2"
+            if voice_backend == "elevenlabs"
+            else "kokoro-v1.0-int8",
         )
-        prepared = prepare_images(product_image, detail_image, style_images)
+        prepared = prepare_images(
+            product_image, detail_image, style_images, allow_incomplete=allow_incomplete
+        )
         brief["asset_hashes"] = {a["asset_id"]: a["sha256"] for a, _ in prepared}
-        brief["asset_ids"] = list(brief["asset_hashes"])
+        brief["asset_ids"] = list(
+            dict.fromkeys(["product_main", "product_detail", *brief["asset_hashes"]])
+        )
         plan = template_plan(brief)
         from .models import CampaignPlan
         from .validation import plan_copy_issues
@@ -279,6 +408,21 @@ class CampaignService:
                     for key in ["voice_backend", "voice_id", "refresh_research"]
                 },
             )
+            brief.update(
+                {
+                    key: changes.get(key, old.get(key))
+                    for key in [
+                        "planning_model",
+                        "voice_model",
+                        "voice_speed",
+                        "input_analysis",
+                        "usage_rates",
+                    ]
+                    if old.get(key) is not None or key in changes
+                }
+            )
+            brief["limits"] = limits_for(changes.get("limits", old.get("limits")))
+            brief["usage_rates"] = rates_for(brief.get("usage_rates"))
             brief["asset_hashes"], brief["asset_ids"] = (
                 old["asset_hashes"],
                 old["asset_ids"],
@@ -286,20 +430,9 @@ class CampaignService:
             plan = template_plan(brief)
             runtime = self.runtime(cid)
             runtime.validate_plan(plan, brief)
-            runtime.agent.update_state(
-                runtime.config,
-                dict(
-                    reset_approval(),
-                    brief=brief,
-                    plan=plan,
-                    research=[],
-                    version=state["version"] + 1,
-                    planner="Local product template — edited brief",
-                    status="awaiting_plan_approval",
-                ),
-                as_node="plan",
+            self._replace_draft(
+                cid, plan, brief, snapshot, "Local product template — edited brief"
             )
-            runtime.agent.invoke(None, runtime.config)
             save_json(self.repository.folder(cid) / "brief.json", brief)
             project_path = self.repository.folder(cid) / "project.json"
             project = read_json(project_path)
@@ -349,7 +482,7 @@ class CampaignService:
                     runtime.agent.update_state(
                         runtime.config,
                         dict(
-                            reset_approval(),
+                            reset_approval(state),
                             decision="revise",
                             feedback=feedback.strip(),
                             status="revising_plan",
@@ -358,14 +491,21 @@ class CampaignService:
                     )
                     runtime.agent.invoke(None, runtime.config)
 
-                return self.jobs.submit(cid, "Revising campaign concepts", change_plan)
+                return self.jobs.submit(
+                    cid,
+                    "Revising campaign concepts",
+                    change_plan,
+                    authorization=lambda owner: self._authorize(
+                        cid, current, action, owner
+                    ),
+                )
             if action == "reopen_plan":
 
                 def reopen():
                     runtime.agent.update_state(
                         runtime.config,
                         dict(
-                            reset_approval(),
+                            reset_approval(state),
                             version=state["version"] + 1,
                             status="awaiting_plan_approval",
                         ),
@@ -373,7 +513,14 @@ class CampaignService:
                     )
                     runtime.agent.invoke(None, runtime.config)
 
-                return self.jobs.submit(cid, "Opening plan review", reopen)
+                return self.jobs.submit(
+                    cid,
+                    "Opening plan review",
+                    reopen,
+                    authorization=lambda owner: self._authorize(
+                        cid, current, action, owner
+                    ),
+                )
             if action == "generate" and stage != "ready_sample":
                 raise ValueError(
                     "Approve and save the plan before generating a sample."
@@ -403,6 +550,9 @@ class CampaignService:
                 signature=current["signature"],
                 feedback=feedback.strip(),
                 index=index,
+                review_id=current["review_id"],
+                receipt=uuid.uuid4().hex,
+                stage=stage,
             )
             approval_title = {
                 "approve_plan": "Saving the approved plan",
@@ -420,67 +570,415 @@ class CampaignService:
                 cid,
                 titles[action],
                 lambda: runtime.agent.invoke(Command(resume=answer), runtime.config),
+                authorization=lambda owner: self._authorize(
+                    cid, current, action, answer["receipt"]
+                ),
             )
 
-    def use_saved_draft(self, cid, expected_signature):
-        with self.lock:
-            snapshot = self.snapshot(cid)
-            if snapshot["busy"]:
-                raise ValueError("Wait for the current job to finish.")
-            if snapshot["signature"] != expected_signature:
-                raise ValueError("The draft changed. Refresh first.")
-            if snapshot["stage"] != "plan":
-                raise ValueError(
-                    "A saved draft can replace only an interrupted planning step."
-                )
-            runtime, state = self.runtime(cid), snapshot["state"]
-            plan = state.get("plan") or template_plan(state["brief"])
-            runtime.validate_plan(plan, state["brief"])
+    def _authorize(self, cid, displayed, action, receipt):
+        actual = self.runtime(cid).snapshot()
+        state = dict(actual.values)
+        stage = actual.next[0] if actual.next else ""
+        checkpoint = actual.config["configurable"]["checkpoint_id"]
+        self.repository.control.consume(
+            displayed["review_id"],
+            cid,
+            stage,
+            checkpoint,
+            review_content(state, stage),
+            action,
+            receipt,
+        )
+
+    def _replace_draft(
+        self,
+        cid,
+        plan,
+        brief,
+        displayed,
+        label="Local revision",
+        prepared_assets=None,
+        lease_held=False,
+    ):
+        from contextlib import nullcontext
+
+        runtime = self.runtime(cid)
+        with nullcontext() if lease_held else self.repository.control.exclusive(cid):
+            current = runtime.snapshot()
+            if (
+                current.config["configurable"]["checkpoint_id"]
+                != displayed["checkpoint"]
+            ):
+                raise ValueError("The checkpoint changed. Refresh before editing.")
+            self.repository.control.revoke(cid)
+            if prepared_assets is not None:
+                store_images(self.repository.folder(cid) / "assets", prepared_assets)
+                assets = self.repository.assets(cid)
+                runtime.planner.assets = runtime.renderer.assets = assets
+            state = dict(current.values)
+            prior = (
+                state.get("prior_outputs", [])
+                + state.get("outputs", [])
+                + ([state["sample"]] if state.get("sample") else [])
+            )
+            unique = {item["video"]: item for item in prior}
             runtime.agent.update_state(
                 runtime.config,
                 dict(
                     reset_approval(),
+                    brief=brief,
                     plan=plan,
+                    prior_outputs=list(unique.values())[-50:],
                     version=state.get("version", 0) + 1,
-                    planner="Saved draft — no new AI call",
+                    status="awaiting_plan_approval",
+                    planner=label,
+                ),
+                as_node="plan",
+            )
+            runtime.agent.invoke(None, runtime.config)
+            save_json(self.repository.folder(cid) / "brief.json", brief)
+        self.jobs.resolve(
+            cid,
+            "Revision saved. Fresh plan approval is required; unchanged media remains cached.",
+        )
+
+    def edit_timeline(self, cid, index, feedback, expected_signature):
+        current = self.snapshot(cid)
+        if current["busy"] or current["signature"] != expected_signature:
+            raise ValueError("Wait for work to finish and refresh the current review.")
+        plan = revise_timeline(current["state"]["plan"], index, feedback)
+        self.save_manual_plan(cid, plan, expected_signature)
+
+    def approve_pending_facts(self, cid, expected_signature):
+        from .facts import normalized
+        from .validation import plan_copy_issues
+        from .models import CampaignPlan
+        from .storage import digest, now
+
+        current = self.snapshot(cid)
+        if current["busy"] or current["signature"] != expected_signature:
+            raise ValueError("The review changed; refresh before approving facts.")
+        pending_path = self.repository.folder(cid) / "pending_facts.json"
+        pending = read_json(pending_path)
+        state = current["state"]
+        if pending["brief_hash"] != digest(state["brief"]) or pending.get(
+            "previous_plan_hash"
+        ) != digest(state.get("plan")):
+            raise ValueError("These proposed facts belong to an older draft.")
+        plan, brief = pending["plan"], dict(state["brief"])
+        issues = plan_copy_issues(CampaignPlan.model_validate(plan), brief)
+        statements = list(
+            dict.fromkeys(
+                issue.split(":", 2)[-1].strip()
+                for issue in issues
+                if issue.startswith("Fact review required:")
+            )
+        )
+        if not statements:
+            raise ValueError("There are no new facts to approve.")
+        facts = dict(brief.get("approved_claims", {}))
+        mapping = {}
+        for text in statements:
+            key = "reviewed_" + digest(text)
+            facts[key] = text
+            mapping[normalized(text)] = key
+        brief["approved_claims"] = facts
+        for ad in plan["ads"]:
+            for scene in ad["scenes"]:
+                for field in ["headline", "caption", "narration", "footnote"]:
+                    key = mapping.get(normalized(scene[field]))
+                    if key and key not in scene["claim_ids"]:
+                        scene["claim_ids"].append(key)
+        self.runtime(cid).validate_plan(plan, brief)
+        self._replace_draft(cid, plan, brief, current, "Explicitly reviewed new facts")
+        save_json(
+            self.repository.folder(cid)
+            / "fact_approvals"
+            / (uuid.uuid4().hex + ".json"),
+            dict(
+                statements=statements,
+                approved_at=now(),
+                source="Explicit human fact review",
+                brief_hash=digest(brief),
+            ),
+        )
+        pending_path.unlink(missing_ok=True)
+
+    def refresh_research(self, cid, expected_signature):
+        current = self.snapshot(cid)
+        if current["signature"] != expected_signature:
+            raise ValueError("Refresh the current review first.")
+
+        def refresh():
+            runtime = self.runtime(cid)
+            sources = runtime.planner.research_competitors(
+                current["state"]["brief"].get("competitors", []), refresh=True
+            )
+            self.repository.control.revoke(cid)
+            runtime.agent.update_state(
+                runtime.config,
+                dict(
+                    reset_approval(current["state"]),
+                    research=sources,
+                    version=current["state"]["version"] + 1,
                     status="awaiting_plan_approval",
                 ),
                 as_node="plan",
             )
             runtime.agent.invoke(None, runtime.config)
 
-            self.jobs.resolve(
-                cid, "Recovered with the saved draft; plan approval is required."
-            )
+        return self.jobs.submit(cid, "Refreshing public competitor sources", refresh)
 
-    def save_manual_plan(self, cid, plan, expected_signature):
-        with self.lock:
-            snapshot = self.snapshot(cid)
-            if snapshot["busy"]:
-                raise ValueError("Wait for the current job to finish.")
-            if snapshot["signature"] != expected_signature:
-                raise ValueError("This draft has changed. Refresh first.")
-            runtime, state = self.runtime(cid), snapshot["state"]
-            runtime.validate_plan(plan, state["brief"])
+    def stop_work(self, cid):
+        self.repository.control.cancel(cid)
+        self.jobs.note(
+            cid,
+            "Cancellation requested. Queued/future tasks stop; work already submitted may finish. No global provider interrupt is sent.",
+        )
+        if self.settings.keys(self.secrets).get("COMFY_WORKFLOW"):
+            from .generation import ComfyFootage
+
+            try:
+                ComfyFootage(
+                    self.settings.keys(self.secrets), self.repository.control, cid
+                ).cancel_queued()
+            except Exception:
+                self.jobs.note(
+                    cid,
+                    "Provider queue could not be confirmed. Reconcile recorded provider jobs; already submitted work may still finish.",
+                )
+
+    def resume_work(self, cid):
+        if self.jobs.busy(cid):
+            raise ValueError("Wait for the running task to stop first.")
+        self.repository.control.cancel(cid, False)
+
+    def reconcile_unknown(self, cid, key, not_submitted=False):
+        from .storage import now
+        from json import loads
+
+        if self.jobs.busy(cid):
+            raise ValueError(
+                "Wait for the active worker to stop before reconciling its request."
+            )
+        with self.repository.control.exclusive(cid):
+            task = self.repository.control.task(cid, key)
+            if not task or task["status"] not in ["unknown", "submitting"]:
+                raise ValueError(
+                    "This task does not have an unknown submission outcome."
+                )
+            if task["kind"] == "generation":
+                from .generation import ComfyFootage
+                from .storage import digest
+
+                try:
+                    found = ComfyFootage(
+                        self.settings.keys(self.secrets), self.repository.control, cid
+                    ).reconcile(digest([cid, key.removeprefix("generation:")]))
+                except requests.RequestException:
+                    raise RuntimeError(
+                        "The local provider is unreachable. Its outcome remains unknown; reconnect it before reconciliation."
+                    ) from None
+                if found:
+                    self.repository.control.task_update(
+                        cid, key, "running", provider_id=found
+                    )
+                    return "Provider job found. Retry processing to poll/download it without a new submission."
+            for row in self.repository.control.usage(cid):
+                if row["key"].startswith(key + ":") and row["status"] == "reserved":
+                    actual = (
+                        {name: 0 for name in loads(row["reserved"])}
+                        if not_submitted
+                        else loads(row["reserved"])
+                    )
+                    self.repository.control.settle(cid, row["key"], actual)
+            self.repository.control.task_update(
+                cid,
+                key,
+                "failed",
+                error="Outcome explicitly reconciled by user; a bounded retry may proceed.",
+            )
+            save_json(
+                self.repository.folder(cid)
+                / "reconciliations"
+                / (uuid.uuid4().hex + ".json"),
+                dict(
+                    task=key,
+                    not_submitted=not_submitted,
+                    checked_at=now(),
+                    source="Explicit user provider/account check",
+                ),
+            )
+            return "Outcome recorded. Existing allowance and retry limits still apply."
+
+    def add_input(self, cid, name, content, kind, expected_signature):
+        from .storage import digest
+        from .inputs import InputAnalyzer
+
+        current = self.snapshot(cid)
+        if current["busy"] or current["signature"] != expected_signature:
+            raise ValueError(
+                "Wait for work to finish and refresh before adding inputs."
+            )
+        suffix = Path(name).suffix.lower()
+        allowed = {
+            "text": [".txt"],
+            "image": [".png", ".jpg", ".jpeg", ".webp"],
+            "audio": [".wav", ".mp3", ".m4a", ".ogg", ".webm"],
+            "video": [".mp4", ".mov", ".webm", ".mkv"],
+        }
+        if (
+            suffix not in allowed.get(kind, [])
+            or not 0 < len(content) <= 200 * 1024 * 1024
+        ):
+            raise ValueError(
+                "Unsupported input file or size; use a supported file up to 200 MB."
+            )
+        folder = self.repository.folder(cid) / "input"
+        folder.mkdir(exist_ok=True)
+        path = folder / (digest(list(content[:100])) + uuid.uuid4().hex[:8] + suffix)
+        path.write_bytes(content)
+
+        def analyze():
+            runtime = self.runtime(cid)
+            result = InputAnalyzer(
+                self.repository.folder(cid) / "analysis",
+                self.settings.keys(self.secrets),
+            ).analyze(path, kind, runtime.renderer.probe)
+            state = dict(runtime.snapshot().values)
+            brief = dict(state["brief"])
+            analyses = {
+                item["file_hash"]: item for item in brief.get("input_analysis", [])
+            }
+            analyses[result["file_hash"]] = result
+            brief["input_analysis"] = list(analyses.values())
+            self.repository.control.revoke(cid)
             runtime.agent.update_state(
                 runtime.config,
                 dict(
-                    reset_approval(),
-                    plan=plan,
+                    reset_approval(state),
+                    brief=brief,
+                    plan=state.get("plan") or template_plan(brief),
                     version=state["version"] + 1,
                     status="awaiting_plan_approval",
-                    planner="Manual script edit",
                 ),
                 as_node="plan",
             )
             runtime.agent.invoke(None, runtime.config)
-            self.jobs.resolve(
-                cid, "A local revision is saved and awaiting plan approval."
+            save_json(self.repository.folder(cid) / "brief.json", brief)
+
+        return self.jobs.submit(cid, "Analyzing reference input", analyze)
+
+    def add_product_images(self, cid, main, detail, expected_signature):
+        current = self.snapshot(cid)
+        if current["busy"] or current["signature"] != expected_signature:
+            raise ValueError("Refresh before replacing product images.")
+        prepared = prepare_images(main, detail)
+        state = current["state"]
+        brief = dict(
+            state["brief"],
+            asset_hashes={a["asset_id"]: a["sha256"] for a, _ in prepared},
+            asset_ids=[a["asset_id"] for a, _ in prepared],
+        )
+        # Content-addressed filenames preserve earlier asset versions.
+        self._replace_draft(
+            cid,
+            state["plan"],
+            brief,
+            current,
+            "Updated product identity images",
+            prepared_assets=prepared,
+        )
+        assets = self.repository.assets(cid)
+        self.runtime(cid).planner.assets = self.runtime(cid).renderer.assets = assets
+
+    def use_saved_draft(self, cid, expected_signature):
+        current = self.snapshot(cid)
+        if current["busy"] or current["signature"] != expected_signature:
+            raise ValueError("Wait for work to finish and refresh the draft.")
+        if current["stage"] != "plan":
+            raise ValueError(
+                "A saved draft can replace only an interrupted planning step."
+            )
+        state = current["state"]
+        plan = state.get("plan") or template_plan(state["brief"])
+        self.runtime(cid).validate_plan(plan, state["brief"])
+        self._replace_draft(
+            cid, plan, state["brief"], current, "Saved/local draft ? no new AI call"
+        )
+
+    def save_manual_plan(self, cid, plan, expected_signature):
+        from .storage import digest
+
+        with self.lock:
+            current = self.snapshot(cid)
+            if current["busy"]:
+                raise ValueError("Wait for the current job to finish.")
+            if current["signature"] != expected_signature:
+                raise ValueError("This draft has changed. Refresh first.")
+            previous = current["state"].get("plan", {})
+            for old, new in zip(previous.get("ads", []), plan.get("ads", [])):
+                if old.get("music_direction") != new.get("music_direction") and old.get(
+                    "audio"
+                ) == new.get("audio"):
+                    raise ValueError(
+                        "Music notes do not execute edits. Change the supported audio timeline parameters."
+                    )
+                for before, after in zip(old["scenes"], new["scenes"]):
+                    if (
+                        before.get("visual_direction") != after.get("visual_direction")
+                        and before.get("edit") == after.get("edit")
+                        and before["asset_ids"] == after["asset_ids"]
+                    ):
+                        raise ValueError(
+                            "Visual notes do not execute edits. Change the supported structured timeline."
+                        )
+            brief = current["state"]["brief"]
+            if any(
+                scene.get("edit", {}).get("mode", "reused") != "reused"
+                for ad in plan["ads"]
+                for scene in ad["scenes"]
+            ):
+                from .generation import ComfyFootage
+                from .cache import file_hash
+
+                keys = self.settings.keys(self.secrets)
+                ready = ComfyFootage(keys, self.repository.control, cid).readiness()
+                if not ready["available"]:
+                    raise ValueError(
+                        ready["message"] + " Select reused image-based mode instead."
+                    )
+                brief = dict(
+                    brief,
+                    generation=dict(
+                        workflow_sha256=file_hash(keys["COMFY_WORKFLOW"]),
+                        minimum_vram_gb=float(keys.get("COMFY_MIN_VRAM_GB") or 10),
+                    ),
+                )
+            try:
+                self.runtime(cid).validate_plan(plan, brief)
+            except ValueError as error:
+                if "Fact review required" in str(error):
+                    save_json(
+                        self.repository.folder(cid) / "pending_facts.json",
+                        dict(
+                            plan=plan,
+                            brief_hash=digest(current["state"]["brief"]),
+                            previous_plan_hash=digest(current["state"].get("plan")),
+                            issues=[str(error)],
+                        ),
+                    )
+                raise
+            self._replace_draft(
+                cid, plan, brief, current, "Manual script/timeline edit"
             )
 
     def save_footage(self, cid, name, content, kind="lifestyle_clip"):
+        from .cache import file_hash
+
         with self.lock:
-            if self.jobs.busy(cid):
+            current = self.snapshot(cid)
+            if current["busy"]:
                 raise ValueError(
                     "Wait for generation to finish before changing footage."
                 )
@@ -496,29 +994,54 @@ class CampaignService:
                 suffix not in [".mp4", ".mov", ".mkv", ".webm"]
                 or not 0 < len(content) <= 200 * 1024 * 1024
             ):
-                raise ValueError("Upload an MP4, MOV, MKV or WebM video up to 200 MB.")
-            runtime = self.runtime(cid)
-            folder = self.repository.folder(cid) / "input"
-            folder.mkdir(exist_ok=True)
-            path = folder / (kind + "-" + uuid.uuid4().hex[:8] + suffix)
-            path.write_bytes(content)
-            try:
-                probe = runtime.renderer.probe(path)
-                if not any(s.get("codec_type") == "video" for s in probe["streams"]):
-                    raise ValueError("The uploaded file has no readable video stream.")
-            except Exception:
-                path.unlink(missing_ok=True)
-                raise ValueError(
-                    "This upload is not a readable video. Try another clip."
-                ) from None
-            files = (
-                read_json(runtime.renderer.commute_config)
-                if runtime.renderer.commute_config.exists()
-                else {}
-            )
-            files[kind] = str(path)
-            save_json(runtime.renderer.commute_config, files)
-            return str(path)
+                raise ValueError("Upload a supported video up to 200 MB.")
+            with self.repository.control.exclusive(cid):
+                runtime = self.runtime(cid)
+                if (
+                    runtime.snapshot().config["configurable"]["checkpoint_id"]
+                    != current["checkpoint"]
+                ):
+                    raise ValueError(
+                        "The checkpoint changed; refresh before uploading."
+                    )
+                folder = self.repository.folder(cid) / "input"
+                folder.mkdir(exist_ok=True)
+                path = folder / (kind + "-" + uuid.uuid4().hex[:8] + suffix)
+                path.write_bytes(content)
+                try:
+                    info = runtime.renderer.probe(path)
+                    if not any(
+                        stream["codec_type"] == "video" for stream in info["streams"]
+                    ):
+                        raise ValueError("The upload has no video stream.")
+                except Exception:
+                    path.unlink(missing_ok=True)
+                    raise ValueError(
+                        "The uploaded file is not a readable video."
+                    ) from None
+                files = (
+                    read_json(runtime.renderer.commute_config)
+                    if runtime.renderer.commute_config.exists()
+                    else {}
+                )
+                files[kind] = str(path)
+                save_json(runtime.renderer.commute_config, files)
+                brief = dict(current["state"]["brief"])
+                brief["asset_hashes"] = dict(
+                    brief.get("asset_hashes", {}), **{kind: file_hash(path)}
+                )
+                brief["asset_ids"] = list(
+                    dict.fromkeys([*brief.get("asset_ids", []), kind])
+                )
+                self._replace_draft(
+                    cid,
+                    current["state"]["plan"],
+                    brief,
+                    current,
+                    "Updated planned footage ? fresh approval required",
+                    lease_held=True,
+                )
+                return str(path)
 
     def check_connections(self, providers):
         if not providers or set(providers) - set(PROVIDERS):

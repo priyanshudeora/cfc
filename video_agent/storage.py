@@ -14,7 +14,13 @@ def now():
 
 
 def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()[:16]
+    return authorization_digest(value)[:32]
+
+
+def authorization_digest(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
 
 
 def read_json(path):
@@ -38,6 +44,9 @@ class Repository:
     def __init__(self, settings):
         self.settings = settings
         settings.campaigns_dir.mkdir(parents=True, exist_ok=True)
+        from .control import ControlStore
+
+        self.control = ControlStore(settings.data_dir / "control.sqlite")
 
     def folder(self, campaign_id):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", campaign_id):
@@ -132,8 +141,53 @@ class Repository:
 
 
 def signature(state):
-    return digest([state["brief"], state["plan"], state["version"]])
+    # Plan identity is deliberately separate from a single-use review identifier.
+    return authorization_digest(
+        [state["campaign_id"], state["brief"], state["plan"], state["version"]]
+    )
 
 
-def reset_approval():
-    return dict(approved_plan_path="", sample={}, outputs=[], export_path="")
+def artifact_identity(result):
+    if not result:
+        return {}
+    files = {}
+    for role in ["video", "captions", "voice"]:
+        path = Path(result.get(role, ""))
+        files[role] = (
+            hashlib.sha256(path.read_bytes()).hexdigest()
+            if path.is_file()
+            else "missing"
+        )
+    return dict(
+        files=files,
+        version=result.get("version"),
+        paths={role: result.get(role, "") for role in ["video", "captions", "voice"]},
+        content_key=result.get("content_key"),
+        quality=result.get("quality"),
+    )
+
+
+def review_content(state, stage):
+    return dict(
+        plan=signature(state),
+        sample=artifact_identity(state.get("sample"))
+        if stage in ["approve_sample", "prepare_assets"]
+        else {},
+        outputs=[artifact_identity(item) for item in state.get("outputs", [])]
+        if stage == "approve_final"
+        else [],
+    )
+
+
+def reset_approval(state=None):
+    result = dict(approved_plan_path="", sample={}, outputs=[], export_path="")
+    if state:
+        prior = (
+            state.get("prior_outputs", [])
+            + state.get("outputs", [])
+            + ([state["sample"]] if state.get("sample") else [])
+        )
+        result["prior_outputs"] = list(
+            {item["video"]: item for item in prior}.values()
+        )[-50:]
+    return result

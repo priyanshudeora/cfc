@@ -7,7 +7,7 @@ import threading
 import pytest
 from io import BytesIO
 from PIL import Image
-from video_agent.config import Settings, LEGACY_ID, LEGACY_DIR, ROOT
+from video_agent.config import Settings
 from video_agent.service import CampaignService
 from video_agent.storage import read_json, save_json
 from video_agent.campaigns import build_brief, template_plan
@@ -218,22 +218,6 @@ def test_restarts_preserve_pending_review(tmp_path):
         restored.close()
 
 
-@pytest.mark.skipif(
-    not (LEGACY_DIR / "plan.json").exists()
-    or not (ROOT / "assets" / "airdopes_141" / "asset_manifest.json").exists(),
-    reason="Optional original notebook fixture is not part of the source repository",
-)
-def test_existing_notebook_import_is_sample_review(tmp_path):
-    api = CampaignService(Settings(data_dir=tmp_path), import_notebook=True)
-    try:
-        snap = api.snapshot(LEGACY_ID)
-        assert snap["stage"] == "approve_sample" and snap["approved"]
-        assert snap["state"].get("sample") and not snap["state"].get("outputs")
-        assert not api.jobs.busy(LEGACY_ID)
-    finally:
-        api.close()
-
-
 def test_ai_plan_uses_structured_response_and_original_images(studio, monkeypatch):
     brief = build_brief(
         "Trail Bottle",
@@ -267,6 +251,15 @@ def test_ai_plan_uses_structured_response_and_original_images(studio, monkeypatc
             }
 
     def request(method, url, **kwargs):
+        if method == "GET":
+
+            class ModelResponse:
+                ok, status_code = True, 200
+
+                def json(self):
+                    return {"name": "models/gemini-2.5-flash"}
+
+            return ModelResponse()
         calls.append(kwargs["json"])
         return Response(kwargs["json"])
 

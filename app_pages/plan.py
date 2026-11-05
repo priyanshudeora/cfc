@@ -9,6 +9,8 @@ from video_agent.ui import (
     review_toolbar,
     download,
     FORMAT_NAMES,
+    usage_panel,
+    fact_review_panel,
 )
 
 api, cid = service(), current_campaign()
@@ -16,6 +18,7 @@ snapshot = api.snapshot(cid)
 state, token = snapshot["state"], snapshot["signature"]
 stage_banner(snapshot)
 activity(cid)
+fact_review_panel(api, cid, snapshot)
 if snapshot["stage"] == "plan" and not snapshot["busy"]:
     if st.button(
         "Use saved draft instead", icon=":material/history:", key="saved_draft_" + cid
@@ -36,7 +39,16 @@ with st.container(horizontal=True):
         "Approved and saved" if snapshot["approved"] else "Awaiting approval",
         color="green" if snapshot["approved"] else "orange",
     )
-    st.caption("Local production tools: ₹0 · AI requests use your account quota")
+    st.caption(
+        "FFmpeg editing · Local or account-metered voice · Allowances saved with approval"
+    )
+usage_panel(snapshot)
+if snapshot.get("missing_assets"):
+    st.info(
+        "Missing planned assets: "
+        + ", ".join(snapshot["missing_assets"])
+        + ". Add them in Campaign brief before generation."
+    )
 st.markdown(state["plan"]["summary"])
 
 for col, ad in zip(st.columns(3), state["plan"]["ads"]):
@@ -64,7 +76,9 @@ elif snapshot["stage"] == "ready_sample":
         type="primary",
         icon=":material/movie:",
         width="stretch",
-        disabled=snapshot["busy"] or not snapshot["approved"],
+        disabled=snapshot["busy"]
+        or not snapshot["approved"]
+        or bool(snapshot.get("missing_assets")),
         key="generate_" + token,
     ):
         action(api, cid, "generate", snapshot)
@@ -76,7 +90,7 @@ else:
 
 view = st.segmented_control(
     "Plan detail",
-    ["Scene plans", "Request changes", "Edit script", "References"],
+    ["Scene plans", "Request changes", "Edit script", "Timeline", "References"],
     default="Scene plans",
     key="plan_detail_" + cid,
 )
@@ -162,6 +176,8 @@ if view in ["Scene plans", "Edit script"]:
                     "Visual direction",
                     value=scene["visual_direction"],
                     key=f"visual_{cid}_{token}_{selected}_{i}",
+                    disabled=True,
+                    help="Descriptive note. Apply executable motion, layout and audio edits in Timeline.",
                 )
             edited["ads"][selected]["assets_required"] = list(
                 dict.fromkeys(
@@ -186,6 +202,51 @@ if view in ["Scene plans", "Edit script"]:
                 st.error(str(error), title="The draft needs changes")
             else:
                 st.rerun()
+elif view == "Timeline":
+    import json
+    from video_agent.models import AdPlan
+
+    selected = st.selectbox(
+        "Video to edit",
+        list(range(3)),
+        format_func=lambda i: ads[i]["title"],
+        key="timeline_ad_" + cid,
+    )
+    st.caption(
+        "These parameters execute in FFmpeg. Local feedback supports: scene 2 move product left; zoom in; fade transitions; quieter music; faster beat. Unsupported instructions are rejected."
+    )
+    feedback = st.text_input("Local timeline feedback", key="timeline_feedback_" + cid)
+    if st.button(
+        "Apply local timeline edit",
+        key="apply_timeline_" + cid,
+        disabled=snapshot["busy"],
+    ):
+        try:
+            api.edit_timeline(cid, selected, feedback, token)
+        except (ValueError, RuntimeError) as error:
+            st.error(str(error))
+        else:
+            st.rerun()
+    with st.form("structured_timeline_" + token):
+        timeline = st.text_area(
+            "Structured video timeline JSON",
+            value=json.dumps(
+                AdPlan.model_validate(ads[selected]).model_dump(), indent=2
+            ),
+            height=500,
+        )
+        submitted = st.form_submit_button(
+            "Validate and save timeline", disabled=snapshot["busy"]
+        )
+    if submitted:
+        try:
+            edited = copy.deepcopy(state["plan"])
+            edited["ads"][selected] = AdPlan.model_validate_json(timeline).model_dump()
+            api.save_manual_plan(cid, edited, token)
+        except (ValueError, RuntimeError) as error:
+            st.error(str(error))
+        else:
+            st.rerun()
 elif view == "Request changes":
     with st.form("revise_plan_" + token):
         feedback = st.text_area(
@@ -205,6 +266,17 @@ elif view == "Request changes":
     if submitted:
         action(api, cid, "revise_plan", snapshot, feedback=feedback)
 else:
+    if st.button(
+        "Refresh public competitor sources",
+        key="refresh_sources_" + cid,
+        disabled=snapshot["busy"],
+    ):
+        try:
+            api.refresh_research(cid, token)
+        except (ValueError, RuntimeError) as error:
+            st.error(str(error))
+        else:
+            st.rerun()
     for source in state.get("research", []):
         if source.get("url"):
             with st.container(border=True):

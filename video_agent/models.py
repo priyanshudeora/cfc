@@ -2,6 +2,7 @@
 
 from typing import Literal
 from pydantic import BaseModel, Field
+from .timeline import SceneEdit, AudioEdit
 
 
 class Scene(BaseModel):
@@ -10,9 +11,10 @@ class Scene(BaseModel):
     narration: str = Field(min_length=1, max_length=240)
     seconds: int = Field(ge=2, le=7)
     asset_ids: list[str] = Field(min_length=1, max_length=2)
-    claim_ids: list[str] = Field(default_factory=list, max_length=2)
+    claim_ids: list[str] = Field(default_factory=list, max_length=8)
     visual_direction: str = Field(min_length=10, max_length=650)
     footnote: str = Field(default="", max_length=160)
+    edit: SceneEdit = Field(default_factory=SceneEdit)
 
 
 class AdPlan(BaseModel):
@@ -25,6 +27,7 @@ class AdPlan(BaseModel):
     assets_required: list[str] = Field(min_length=1, max_length=8)
     search_query: str = Field(default="", max_length=90)
     scenes: list[Scene] = Field(min_length=5, max_length=5)
+    audio: AudioEdit = Field(default_factory=AudioEdit)
 
 
 class CampaignPlan(BaseModel):

@@ -1,56 +1,8 @@
-from pathlib import Path
 import numpy as np
 import pytest
-from video_agent.config import Settings, LEGACY_ID, LEGACY_DIR, ROOT
+from video_agent.config import Settings
 from video_agent.service import CampaignService
 from video_agent.connections import redact, check_provider
-
-
-@pytest.mark.skipif(
-    not (LEGACY_DIR / "plan.json").exists()
-    or not (ROOT / "assets" / "airdopes_141" / "asset_manifest.json").exists(),
-    reason="Optional original notebook fixture is not part of the source repository",
-)
-def test_rendered_frames_and_existing_video_validation(tmp_path):
-    api = CampaignService(Settings(data_dir=tmp_path), import_notebook=True)
-    try:
-        runtime = api.runtime(LEGACY_ID)
-        state = api.snapshot(LEGACY_ID)["state"]
-        photos = runtime.renderer.identity_images()
-        for ad in state["plan"]["ads"]:
-            cues, clock = [], 0
-            for scene in ad["scenes"]:
-                cues.append(
-                    dict(
-                        start=clock,
-                        end=clock + scene["seconds"],
-                        caption=scene["caption"],
-                    )
-                )
-                clock += scene["seconds"]
-            for second in [0.0, 6.0, 19.0]:
-                import itertools
-
-                readers = {
-                    "commute_walk": itertools.repeat(
-                        bytes([100, 115, 130]) * (540 * 960)
-                    )
-                }
-                frame = runtime.renderer.concept_frame(
-                    ad, cues, photos, second, readers
-                )
-                assert frame.size == (1080, 1920) and frame.mode == "RGB"
-        quality = runtime.renderer.validate_video(
-            Path(state["sample"]["video"]), tmp_path
-        )
-        assert quality["full_audio_video_decode"] and quality["frames"] == 600
-        runtime.renderer.make_music(tmp_path, state["plan"]["ads"][0])
-        import soundfile as sf
-
-        music, rate = sf.read(tmp_path / "music-original.wav")
-        assert rate == 24000 and len(music) == 480000 and np.isfinite(music).all()
-    finally:
-        api.close()
 
 
 def test_credentials_are_redacted():

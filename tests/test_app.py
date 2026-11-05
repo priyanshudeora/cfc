@@ -48,6 +48,29 @@ def test_pages_render_without_generating_media(app):
     assert after["job"] == before["job"]
 
 
+def test_fact_confirmation_resets_for_a_different_proposed_draft(app):
+    import copy
+
+    at, api = app
+    cid = at.session_state["active_campaign"]
+    snap = api.snapshot(cid)
+    for statement in ["Lifetime warranty included.", "Two year warranty included."]:
+        plan = copy.deepcopy(snap["state"]["plan"])
+        plan["ads"][0]["scenes"][0]["headline"] = statement
+        with pytest.raises(ValueError, match="Fact review required"):
+            api.save_manual_plan(cid, plan, snap["signature"])
+        at.switch_page("app_pages/plan.py").run()
+        assert not at.exception
+        check = next(w for w in at.checkbox if w.key.startswith("confirm_facts_"))
+        assert not check.value
+        assert any(
+            w.label == "Full proposed draft for fact review" for w in at.expander
+        )
+        check.check().run()
+    assert api.snapshot(cid)["approved"] == snap["approved"]
+    assert api.snapshot(cid)["signature"] == snap["signature"]
+
+
 def test_plan_approval_and_manual_revision_ui(app):
     at, api = app
     cid = at.session_state["active_campaign"]
@@ -71,7 +94,7 @@ def test_plan_approval_and_manual_revision_ui(app):
     headline = next(
         w for w in at.text_input if w.label == "Headline" and not w.disabled
     )
-    headline.set_value("Five minutes. Big plans.")
+    headline.set_value("Look closer")
     next(
         w for w in at.form_submit_button if w.label == "Save revised draft"
     ).click().run()

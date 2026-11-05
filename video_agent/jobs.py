@@ -30,6 +30,7 @@ class Job:
 class JobManager:
     def __init__(self, repository, scrub=str):
         self.repository = repository
+        self.control = repository.control
         self.scrub = scrub
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="video-studio")
         self.jobs, self.lock = {}, threading.RLock()
@@ -37,7 +38,7 @@ class JobManager:
     def busy(self, cid):
         with self.lock:
             job = self.jobs.get(cid)
-            return bool(job and job.status == "running")
+            return bool(job and job.status == "running") or self.control.busy(cid)
 
     def get(self, cid):
         with self.lock:
@@ -46,7 +47,7 @@ class JobManager:
         path = self.repository.folder(cid) / "last_job.json"
         if path.exists():
             record = read_json(path)
-            if record["status"] == "running":
+            if record["status"] == "running" and not self.control.busy(cid):
                 record.update(
                     status="interrupted",
                     error="The app restarted. Retry the interrupted step to continue.",
@@ -63,16 +64,37 @@ class JobManager:
             match = re.search(r"Encoding sample: (\d+)/20", str(message))
             if match:
                 job.progress = min(0.98, int(match.group(1)) / 20)
+            scene = re.search(r"Scene (\d+)/5", str(message))
+            if scene:
+                job.progress = max(
+                    job.progress, min(0.9, 0.3 + int(scene.group(1)) * 0.1)
+                )
+            save_json(self.repository.folder(cid) / "last_job.json", job.public())
 
-    def submit(self, cid, title, function):
+    def submit(self, cid, title, function, authorization=None):
         with self.lock:
             if self.busy(cid):
                 raise ValueError("This campaign already has a job running.")
             job = Job(uuid.uuid4().hex, title)
+            self.control.acquire(cid, job.id)
+            try:
+                if authorization:
+                    authorization(job.id)
+            except BaseException:
+                self.control.release(cid, job.id)
+                raise
             self.jobs[cid] = job
             save_json(self.repository.folder(cid) / "last_job.json", job.public())
 
             def run():
+                stopped = threading.Event()
+
+                def renew():
+                    while not stopped.wait(self.control.lease_seconds / 3):
+                        self.control.heartbeat(cid, job.id)
+
+                heartbeat = threading.Thread(target=renew, daemon=True)
+                heartbeat.start()
                 try:
                     function()
                 except Exception as error:
@@ -83,6 +105,9 @@ class JobManager:
                     with self.lock:
                         job.status, job.progress = "finished", 1.0
                 finally:
+                    stopped.set()
+                    heartbeat.join(timeout=2)
+                    self.control.release(cid, job.id)
                     save_json(
                         self.repository.folder(cid) / "last_job.json", job.public()
                     )

@@ -9,7 +9,15 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import interrupt
 from .models import CampaignPlan
 from .validation import plan_copy_issues
-from .storage import read_json, save_json, signature, reset_approval
+from .storage import (
+    read_json,
+    save_json,
+    signature,
+    reset_approval,
+    artifact_identity,
+    review_content,
+)
+from .timeline import ad_key
 from .planning import Planner
 from .rendering.renderer import VideoRenderer
 
@@ -29,6 +37,8 @@ class CampaignState(TypedDict, total=False):
     status: str
     approved_plan_path: str
     export_path: str
+    prior_outputs: list
+    input_analysis: list
 
 
 class CampaignRuntime:
@@ -38,6 +48,7 @@ class CampaignRuntime:
         folder.mkdir(parents=True, exist_ok=True)
         assets = repository.assets(cid)
         self.planner = Planner(folder, keys, assets, note)
+        self.planner.control = repository.control
         self.renderer = VideoRenderer(folder, repository.settings, assets, keys, note)
         brief_path = folder / "brief.json"
         self.renderer.brief = read_json(brief_path) if brief_path.exists() else {}
@@ -125,7 +136,7 @@ class CampaignRuntime:
         sources = state.get("research", [])
         if state["brief"].get("refresh_research"):
             sources = sources + self.planner.research_competitors(
-                state["brief"]["competitors"]
+                state["brief"]["competitors"], refresh=True
             )
         return {"research": sources}
 
@@ -138,7 +149,7 @@ class CampaignRuntime:
         )
         self.validate_plan(plan, state["brief"])
         return dict(
-            reset_approval(),
+            reset_approval(state),
             plan=plan,
             planner=provider,
             version=state.get("version", 0) + 1,
@@ -162,12 +173,22 @@ class CampaignRuntime:
         )
         if answer.get("action") not in actions:
             raise ValueError("Invalid review action.")
-        if answer["action"] in ["approve", "generate"] and answer.get(
-            "signature"
-        ) != signature(state):
-            raise ValueError(
-                "The plan changed. Refresh and review the current version."
-            )
+        node = {
+            "plan": "approve_plan",
+            "sample": "approve_sample",
+            "final": "approve_final",
+            "generation": "ready_sample",
+            "footage": "prepare_assets",
+        }[stage]
+        self.repository.control.receipt(
+            answer.get("review_id", ""),
+            self.cid,
+            node,
+            answer["action"],
+            answer.get("receipt", ""),
+            review_content(state, node),
+            self.snapshot().config["configurable"]["checkpoint_id"],
+        )
         if answer["action"] == "revise" and not answer.get("feedback", "").strip():
             raise ValueError("Describe the requested changes.")
         index = int(answer.get("index", 0))
@@ -196,6 +217,7 @@ class CampaignRuntime:
         if state.get("decision") != "approve":
             raise ValueError("Explicit plan approval is required.")
         self.validate_plan(state["plan"], state["brief"])
+        self.repository.control.require_grant(self.cid, "sample", signature(state))
         path = self.repository.approve(state)
         self.note("Approved plan and scripts saved.")
         return dict(approved_plan_path=path, status="ready_to_generate_sample")
@@ -207,6 +229,12 @@ class CampaignRuntime:
 
     def sample(self, state):
         self.repository.require_approval(state)
+        self.repository.control.require_grant(
+            self.cid,
+            "sample",
+            signature(state),
+            ad_key(state["plan"]["ads"][0], state["brief"]),
+        )
         return dict(
             sample=self.renderer.render(
                 state, state["plan"]["ads"][0], self.repository
@@ -224,7 +252,7 @@ class CampaignRuntime:
         plan = self.planner.revise_ad(state, index, state["feedback"])
         self.validate_plan(plan, state["brief"])
         return dict(
-            reset_approval(),
+            reset_approval(state),
             plan=plan,
             version=state["version"] + 1,
             status="awaiting_plan_approval",
@@ -254,14 +282,8 @@ class CampaignRuntime:
             )
 
         if missing():
-            answer = interrupt(
-                {
-                    "stage": "footage",
-                    "message": "Upload the planned lifestyle footage.",
-                    "missing": missing(),
-                }
-            )
-            if answer.get("action") == "cancel":
+            answer = self.review(state, "footage", ("continue", "cancel"))
+            if answer.get("decision") == "cancel":
                 return {"status": "cancelled"}
             if missing():
                 raise ValueError(
@@ -271,6 +293,7 @@ class CampaignRuntime:
 
     def batch(self, state):
         self.repository.require_approval(state)
+        self.repository.control.require_grant(self.cid, "batch", signature(state))
         outputs = [state["sample"]]
         for number, ad in enumerate(state["plan"]["ads"][1:], 2):
             self.note(f"Rendering video {number}/3: {ad['title']}")
@@ -279,6 +302,15 @@ class CampaignRuntime:
 
     def export(self, state):
         self.repository.require_approval(state)
+        scope = self.repository.control.require_grant(
+            self.cid, "export", signature(state)
+        )
+        if scope["outputs"] != [
+            artifact_identity(item) for item in state.get("outputs", [])
+        ]:
+            raise ValueError(
+                "Outputs changed after final approval. Review the actual output versions again."
+            )
         folder = (
             self.repository.folder(self.cid)
             / "deliverables"

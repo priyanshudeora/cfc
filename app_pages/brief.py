@@ -1,5 +1,6 @@
 import streamlit as st
-from video_agent.ui import service, footage_upload
+from video_agent.ui import service, footage_upload, input_panel
+from video_agent.control import DEFAULT_LIMITS
 
 api = service()
 cid = st.session_state.get("active_campaign")
@@ -57,6 +58,7 @@ if not new and not editing:
                 + brief.get("product", "this campaign"),
             )
     footage_upload(api, cid, snapshot)
+    input_panel(api, cid, snapshot)
 else:
     values = brief if editing else {}
     st.markdown(
@@ -147,6 +149,68 @@ else:
             value=values.get("accent_color", "#00AABD"),
             key="brand_accent",
         )
+        st.markdown("### Usage allowances")
+        st.caption(
+            "Campaign totals. Zero blocks metered speech or footage generation. Limits travel with each approved stage."
+        )
+        limits = {
+            key: int(
+                st.number_input(
+                    key.replace("_", " ").capitalize(),
+                    min_value=0,
+                    max_value=1_000_000_000,
+                    value=int(values.get("limits", DEFAULT_LIMITS).get(key, default)),
+                    step=1,
+                    key="limit_" + key,
+                )
+            )
+            for key, default in DEFAULT_LIMITS.items()
+            if key != "cost_microusd"
+        }
+        limits["cost_microusd"] = round(
+            st.number_input(
+                "Maximum estimated API spend (USD, at supplied rates)",
+                min_value=0.0,
+                max_value=1000.0,
+                value=values.get("limits", DEFAULT_LIMITS).get("cost_microusd", 0)
+                / 1_000_000,
+                step=0.01,
+                key="spend_usd",
+            )
+            * 1_000_000
+        )
+        st.caption(
+            "Account prices are not inferred. Leave rates at zero for unpriced usage; token/character/job caps still apply. Positive rates activate the estimated monetary cap."
+        )
+        rates = {
+            key: st.number_input(
+                label,
+                min_value=0.0,
+                max_value=1000.0,
+                value=float(values.get("usage_rates", {}).get(key, 0)) / scale,
+                step=0.01,
+                key="rate_" + key,
+            )
+            * scale
+            for key, label, scale in [
+                ("model_tokens", "Your model price per 1,000 total tokens (USD)", 1000),
+                (
+                    "speech_characters",
+                    "Your speech price per 1,000 characters (USD)",
+                    1000,
+                ),
+                (
+                    "generation_jobs",
+                    "Your configured footage cost per job (USD)",
+                    1_000_000,
+                ),
+            ]
+        }
+        model = st.text_input(
+            "Gemini planning model",
+            value=values.get("planning_model", "gemini-2.5-flash"),
+            key="planning_model",
+        )
         use_footage = st.checkbox(
             "Use my own lifestyle footage in the story video",
             value=values.get("use_footage", False),
@@ -174,7 +238,7 @@ else:
                 key="style_reference_images",
             )
             st.caption(
-                "The original uploaded images preserve product appearance. One image is enough; style references guide the plan and are not used as ad frames."
+                "Planning can start without images. Add product identity images before generation. Style references guide planning and do not become ad frames."
             )
             starting = st.segmented_control(
                 "Starting point",
@@ -229,6 +293,9 @@ else:
                 competitors=competitors,
                 accent_color=accent,
                 use_footage=use_footage,
+                limits=limits,
+                planning_model=model,
+                usage_rates={key: value for key, value in rates.items() if value > 0},
             )
             if editing:
                 api.update_brief(cid, changes, snapshot["signature"])
@@ -247,8 +314,9 @@ else:
                     **{
                         k: v
                         for k, v in changes.items()
-                        if k not in ["audience", "goal"]
+                        if k not in ["audience", "goal", "planning_model"]
                     },
+                    model=model,
                     product_image=(main.name, main.getvalue()) if main else None,
                     detail_image=(detail.name, detail.getvalue()) if detail else None,
                     style_images=[

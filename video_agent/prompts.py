@@ -107,6 +107,19 @@ Missing media is expected at this proposal checkpoint. Give concrete rewrite ins
 """
 )
 
+EXECUTABLE_EDITS = """
+Return complete structured scene.edit and ad.audio objects. Supported executable edits:
+asset choice, clip trim, normalized placement/size, contain/cover, zoom_start/end,
+pan_x/y, mask none/wipe_left/circle, transition cut/fade, headline text layout,
+audio bpm/music_gain/voice_gain. Prose visual/music notes only explain those parameters.
+Do not promise unsupported edits. Use reused image-based motion graphics by default.
+Generated/hybrid mode requires configured local ComfyUI and approved job allowance;
+still-image animation is never labelled AI-generated footage. Unknown copy requires
+explicit human fact review. No automatic paid provider or model fallback.
+"""
+WRITER_SYSTEM += EXECUTABLE_EDITS
+REVIEW_SYSTEM += EXECUTABLE_EDITS
+
 REVISION_SYSTEM = (
     WRITER_SYSTEM
     + """

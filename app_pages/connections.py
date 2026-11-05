@@ -1,3 +1,4 @@
+from pathlib import Path
 import streamlit as st
 from video_agent.config import ROOT
 from video_agent.ui import service, activity
@@ -54,6 +55,48 @@ if st.button(
     else:
         st.rerun()
 activity("api-diagnostics")
+
+with st.expander("Optional local transcription and footage generation"):
+    from video_agent.inputs import transcription_config
+
+    transcription_binary, transcription_model = transcription_config(keys)
+
+    st.caption(
+        "Motion graphics use your uploaded assets. New footage is a separate optional local ComfyUI stage; it requires installed model weights, a compatible exported API workflow and suitable GPU memory."
+    )
+    st.caption(
+        "whisper.cpp: "
+        + (
+            "executable and model available"
+            if transcription_binary
+            and transcription_model
+            and Path(transcription_binary).is_file()
+            and Path(transcription_model).is_file()
+            else "unavailable; use a manual transcript or configure WHISPER_CPP_BIN and WHISPER_CPP_MODEL"
+        )
+    )
+    if st.button("Check local footage provider", key="check_comfy"):
+        from video_agent.generation import ComfyFootage
+
+        try:
+            st.json(
+                ComfyFootage(
+                    keys,
+                    api.repository.control,
+                    st.session_state.get("active_campaign") or "provider-check",
+                ).readiness()
+            )
+        except (ValueError, RuntimeError) as error:
+            st.error(str(error))
+    cid = st.session_state.get("active_campaign")
+    if cid and st.button("Check campaign model access", key="check_model_access"):
+        model = api.snapshot(cid)["state"]["brief"].get(
+            "planning_model", "gemini-2.5-flash"
+        )
+        try:
+            st.json(api.runtime(cid).planner.check_model_access(model))
+        except (ValueError, RuntimeError) as error:
+            st.error(str(error))
 
 for provider, result in results.items():
     with st.expander(

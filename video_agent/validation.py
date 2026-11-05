@@ -3,6 +3,7 @@
 import re
 from .models import *
 from .prompts import BANNED_COPY
+from .facts import normalized, copy_issues
 
 
 def word_count(text):
@@ -29,7 +30,7 @@ def scene_copy_issues(scene, label, is_cta=False):
     issues = []
     if not is_cta and word_count(scene.headline) > 6:
         issues.append(label + ": shorten headline to 6 words.")
-    if scene.caption != scene.narration:
+    if normalized(scene.caption) != normalized(scene.narration):
         issues.append(label + ": caption must exactly transcribe narration.")
     if spoken_word_count(scene.narration) > scene.seconds * 2.6:
         issues.append(label + ": narration exceeds 2.6 words per second.")
@@ -155,6 +156,7 @@ def plan_copy_issues(plan, brief):
         issues
         + language_copy_issues(plan, brief)
         + claim_copy_issues(plan, brief)
+        + (copy_issues(plan, brief) if brief.get("schema_version", 1) >= 2 else [])
         + (numeric_claim_issues(plan) if brief.get("schema_version", 1) < 2 else [])
     )
 
@@ -172,7 +174,7 @@ def generic_claim_issues(plan, brief):
     product_context = " ".join(
         str(brief.get(key, "")) for key in ["product", "brand", "variant", "cta"]
     )
-    normal = lambda value: re.sub(r"\s+", " ", value.casefold()).strip().rstrip(".")
+    normal = normalized
     for number, ad in enumerate(plan.ads, 1):
         for scene in ad.scenes:
             label = f"Ad {number}: "
@@ -190,9 +192,11 @@ def generic_claim_issues(plan, brief):
             authorized = " ".join(facts.get(key, "") for key in scene.claim_ids)
             visible = " ".join([scene.headline, scene.narration, scene.footnote])
             approved_numbers = set(
-                re.findall(r"\d+(?:[.,]\d+)?", authorized + " " + product_context)
+                re.findall(
+                    r"\d+(?:[.,]\d+)?", normalized(authorized + " " + product_context)
+                )
             )
-            for value in re.findall(r"\d+(?:[.,]\d+)?", visible):
+            for value in re.findall(r"\d+(?:[.,]\d+)?", normalized(visible)):
                 if value not in approved_numbers:
                     issues.append(
                         label + f"unapproved number or specification: {value}."

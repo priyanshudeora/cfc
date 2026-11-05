@@ -23,109 +23,6 @@ class RenderMixin:
                 "FFmpeg failed: " + result.stderr.decode(errors="replace")[-350:]
             )
 
-    def notebook_encoder_arguments(self, folder):
-        args = [
-            FFMPEG,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "-s",
-            "1080x1920",
-            "-r",
-            str(VIDEO_FPS),
-            "-i",
-            "pipe:0",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "18",
-            "-threads",
-            "4",
-            "-pix_fmt",
-            "yuv420p",
-            str(folder / "silent.mp4"),
-        ]
-        return args
-
-    def encode(self, ad, cues, folder):
-        photos = self.identity_images()
-        used = {
-            key
-            for scene in ad["scenes"]
-            for key in scene["asset_ids"]
-            if key.startswith(("commute_", "lifestyle_"))
-        }
-        readers = self.footage_readers(used) if used else {}
-        args = self.notebook_encoder_arguments(folder)
-        with (folder / "render.log").open("wb") as log:
-            process = subprocess.Popen(
-                args,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=log,
-                creationflags=subprocess.CREATE_NO_WINDOW
-                if sys.platform == "win32"
-                else 0,
-            )
-            try:
-                for number in range(20 * VIDEO_FPS):
-                    if number % 90 == 0:
-                        self.note(f"Encoding sample: {number // VIDEO_FPS}/20 seconds.")
-                    process.stdin.write(
-                        self.concept_frame(
-                            ad, cues, photos, number / VIDEO_FPS, readers
-                        ).tobytes()
-                    )
-                process.stdin.close()
-                if process.wait(timeout=180):
-                    raise RuntimeError("Video encoding failed; inspect render.log.")
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
-                for reader in readers.values():
-                    reader.close()
-
-    def mux(self, folder):
-        self.ffmpeg(
-            [
-                "-i",
-                "silent.mp4",
-                "-i",
-                "mix.wav",
-                "-map",
-                "0:v:0",
-                "-map",
-                "1:a:0",
-                "-af",
-                "loudnorm=I=-16:TP=-1.5:LRA=9",
-                "-t",
-                "20",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-ar",
-                "48000",
-                "-ac",
-                "2",
-                "-b:a",
-                "192k",
-                "-movflags",
-                "+faststart",
-                "final.mp4",
-            ],
-            folder,
-        )
-
     def probe(self, path):
         program = shutil.which("ffprobe")
         if not program:
@@ -181,17 +78,43 @@ class RenderMixin:
 
     def validate_video(self, path, folder):
         probe = self.probe(path)
-        video = next((s for s in probe["streams"] if s["codec_type"] == "video"))
-        audio = next((s for s in probe["streams"] if s["codec_type"] == "audio"))
-        assert (video["width"], video["height"]) == VIDEO_SIZE
-        assert video["codec_name"] == "h264" and video["pix_fmt"] == "yuv420p"
-        assert video["avg_frame_rate"] == "30/1" and int(video["nb_frames"]) == 600
-        assert audio["codec_name"] == "aac" and audio["channels"] == 2
-        assert abs(float(probe["format"]["duration"]) - 20) <= 0.05
+        video = next((s for s in probe["streams"] if s["codec_type"] == "video"), None)
+        audio = next((s for s in probe["streams"] if s["codec_type"] == "audio"), None)
+        if not video or not audio:
+            raise ValueError(
+                "The export must contain both readable video and audio streams."
+            )
+        checks = [
+            (
+                (video["width"], video["height"]) == VIDEO_SIZE,
+                "Incorrect export dimensions",
+            ),
+            (
+                video["codec_name"] == "h264" and video["pix_fmt"] == "yuv420p",
+                "Incorrect video format",
+            ),
+            (
+                video["avg_frame_rate"] == "30/1" and int(video["nb_frames"]) == 600,
+                "Incorrect frame count or frame rate",
+            ),
+            (
+                audio["codec_name"] == "aac" and audio["channels"] == 2,
+                "Incorrect audio format",
+            ),
+            (
+                abs(float(probe["format"]["duration"]) - 20) <= 0.05,
+                "Incorrect video duration",
+            ),
+        ]
+        for valid, message in checks:
+            if not valid:
+                raise ValueError(message)
         self.decode_check(path, folder)
         loudness = self.measure_loudness(path)
-        assert -18 <= loudness["input_i"] <= -14, loudness
-        assert loudness["input_tp"] <= -1.0, loudness
+        if not -18 <= loudness["input_i"] <= -14 or loudness["input_tp"] > -1:
+            raise ValueError(
+                "Export audio levels are outside the accepted range: " + str(loudness)
+            )
         result = dict(
             status="passed",
             duration=20,
@@ -219,12 +142,16 @@ class RenderMixin:
         video, captions = (destination / (stem + ".mp4"), destination / (stem + ".srt"))
         shutil.copy2(folder / "final.mp4", video)
         shutil.copy2(folder / "captions.srt", captions)
+        from ..cache import file_hash
+
         result = dict(
             title=ad["title"],
             version=version,
             seconds=20,
             video=str(video),
+            video_sha256=file_hash(video),
             captions=str(captions),
+            captions_sha256=file_hash(captions),
             voice=str(folder / "voice.wav"),
             voice_provider="ElevenLabs"
             if self.voice_backend == "elevenlabs"
@@ -246,16 +173,36 @@ class RenderMixin:
         return result
 
     def build_video(self, brief, ad, version, folder):
+        from .editor import FFmpegEditor
+
         cues = self.voice_timeline(ad, folder)
-        self.mix_audio(folder, cues, ad)
-        self.caption_files(cues, folder)
-        self.encode(ad, cues, folder)
-        self.mux(folder)
+        self.make_music(folder, ad)
+        editor = FFmpegEditor(self, self.media_cache, workers=self.settings.cpu_workers)
+        editor.encode(ad, brief, folder)
+        editor.mux(ad, cues, folder)
+        from .review import review_render
+
+        media_review = review_render(self, brief, ad, cues, folder)
         quality = self.validate_video(folder / "final.mp4", folder)
+        quality["media_contract"] = media_review
         save_json(
             folder / "timeline.json",
             dict(brief=brief, ad=ad, cues=cues, quality=quality),
         )
-        result = self.deliver(ad, version, folder, quality)
+        result = dict(
+            folder=str(folder),
+            quality=quality,
+            _files=[
+                folder / name
+                for name in [
+                    "final.mp4",
+                    "voice.wav",
+                    "captions.srt",
+                    "edit_manifest.json",
+                    "media_review.json",
+                    "review-contact-sheet.jpg",
+                ]
+            ],
+        )
         self.note("Video ready: " + ad["title"])
         return result
