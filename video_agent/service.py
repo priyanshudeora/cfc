@@ -197,10 +197,14 @@ class CampaignService:
         detail_image=None,
         style_images=(),
         limits=None,
-        model="gemini-2.5-flash",
+        model=None,
         allow_incomplete=True,
         usage_rates=None,
     ):
+        defaults = self.settings.campaign_defaults(self.secrets)
+        model = model or defaults["model"]
+        limits = defaults["limits"] if limits is None else limits
+        usage_rates = defaults["usage_rates"] if usage_rates is None else usage_rates
         if not name.strip() or not audience.strip() or not goal.strip():
             raise ValueError("Add a campaign name, audience and goal.")
         if not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", model):

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import json
 from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,11 +43,25 @@ class Settings:
                 k: v
                 for k, v in os.environ.items()
                 if k.endswith("_API_KEY")
-                or k.startswith(("COMFY_", "WHISPER_", "ELEVENLABS_"))
+                or k.startswith(("COMFY_", "WHISPER_", "ELEVENLABS_", "CFC_"))
             }
         )
         values.update(overrides or {})
         return {k: str(v or "") for k, v in values.items()}
+
+    def campaign_defaults(self, overrides=None):
+        """Server policy for new campaigns; existing saved policy is immutable on form edits."""
+        keys = self.keys(overrides)
+        defaults = dict(
+            model=keys.get("CFC_PLANNING_MODEL") or "gemini-2.5-flash",
+            limits=json.loads(keys.get("CFC_DEFAULT_LIMITS_JSON") or "{}"),
+            usage_rates=json.loads(keys.get("CFC_DEFAULT_USAGE_RATES_JSON") or "{}"),
+        )
+        if not all(isinstance(defaults[k], dict) for k in ["limits", "usage_rates"]):
+            raise ValueError(
+                "Server campaign defaults must use JSON objects for limits and rates."
+            )
+        return defaults
 
     @property
     def campaigns_dir(self):

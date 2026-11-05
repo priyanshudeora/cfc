@@ -119,6 +119,78 @@ def test_create_campaign_validates_required_product_inputs(app):
     assert any("product name" in item.value for item in at.error)
 
 
+def test_creation_has_no_usage_widgets_and_uses_backend_defaults(app):
+    from video_agent.control import DEFAULT_LIMITS
+
+    at, api = app
+    at.button(key="new_campaign_button").click().run()
+    assert not at.number_input
+    assert not any(w.key == "planning_model" for w in at.text_input)
+    assert not any("Usage allowances" in w.value for w in at.markdown)
+    at.text_input(key="campaign_name").set_value("Simple input test")
+    at.text_input(key="product_name").set_value("Travel Bottle")
+    at.text_input(key="campaign_audience").set_value("Travelers")
+    next(w for w in at.form_submit_button if w.label == "Create campaign").click().run()
+    assert not at.exception
+    brief = api.snapshot(at.session_state["active_campaign"])["state"]["brief"]
+    assert brief["limits"] == DEFAULT_LIMITS
+    assert brief["usage_rates"] == {} and brief["planning_model"] == "gemini-2.5-flash"
+
+
+def test_editing_preserves_hidden_backend_settings(app):
+    from test_workflow import make_campaign
+    from video_agent.control import DEFAULT_LIMITS
+
+    at, api = app
+    cid = make_campaign(
+        api,
+        limits=dict(DEFAULT_LIMITS, model_tokens=77777),
+        usage_rates={"model_tokens": 2.5},
+        model="gemini-example-model",
+    )
+    before = api.snapshot(cid)["state"]["brief"]
+    at.run()
+    at.selectbox(key="active_campaign").select(cid).run()
+    at.switch_page("app_pages/brief.py").run()
+    at.button(key="edit_brief").click().run()
+    assert not at.number_input and not any(
+        w.key == "planning_model" for w in at.text_input
+    )
+    at.text_input(key="campaign_audience").set_value("Updated audience")
+    next(
+        w for w in at.form_submit_button if w.label == "Save brief and reset plan"
+    ).click().run()
+    assert not at.exception
+    after = api.snapshot(cid)["state"]["brief"]
+    assert after["audience"] == "Updated audience"
+    for key in ["limits", "usage_rates", "planning_model"]:
+        assert after[key] == before[key]
+
+
+def test_manual_transcript_can_be_saved_with_a_recording_still_selected(
+    app, monkeypatch
+):
+    from io import BytesIO
+
+    at, api = app
+    cid = at.session_state["active_campaign"]
+    recording = BytesIO(b"not submitted to transcription")
+    monkeypatch.setattr("streamlit.audio_input", lambda *a, **kw: recording)
+    at.switch_page("app_pages/brief.py").run()
+    at.text_area(key="input_text_" + cid).set_value(
+        "My manually entered transcript."
+    ).run()
+    at.button(key="save_manual_transcript_" + cid).click().run()
+    api.jobs.wait(cid)
+    at.run()
+    assert not at.exception
+    analyses = api.snapshot(cid)["state"]["brief"]["input_analysis"]
+    assert (
+        analyses[-1]["kind"] == "text"
+        and analyses[-1]["text"] == "My manually entered transcript."
+    )
+
+
 def test_empty_plan_feedback_is_rejected_in_ui(app):
     at, api = app
     cid = at.session_state["active_campaign"]

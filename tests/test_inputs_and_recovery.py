@@ -219,6 +219,39 @@ def test_new_input_preserves_prior_outputs(studio):
     assert Path(video).is_file()
 
 
+def test_manual_transcript_fallback_with_missing_whisper_and_relative_folder(
+    studio, tmp_path, monkeypatch
+):
+    from video_agent.inputs import InputAnalyzer
+
+    cid = make_campaign(studio)
+    # Explicit missing settings must override any developer-machine installation.
+    analyzer = InputAnalyzer(
+        tmp_path / "analysis",
+        {
+            "WHISPER_CPP_BIN": str(tmp_path / "missing.exe"),
+            "WHISPER_CPP_MODEL": str(tmp_path / "missing.bin"),
+        },
+    )
+    result = analyzer.transcribe(tmp_path / "recording.wav", tmp_path / "analysis")
+    assert result["status"] == "unavailable" and "manually" in result["message"]
+    before = studio.snapshot(cid)
+    studio.add_input(
+        cid,
+        "manual-transcript.txt",
+        b"A manually corrected spoken brief.",
+        "text",
+        before["signature"],
+    )
+    studio.jobs.wait(cid)
+    analysis = studio.snapshot(cid)["state"]["brief"]["input_analysis"][0]
+    assert analysis["text"] == "A manually corrected spoken brief."
+    monkeypatch.chdir(tmp_path)
+    assert (
+        InputAnalyzer("relative-analysis", {}).folder == tmp_path / "relative-analysis"
+    )
+
+
 def test_research_cache_expiry_deduplication_and_real_refresh(studio, monkeypatch):
     cid = make_campaign(studio)
     planner = studio.runtime(cid).planner

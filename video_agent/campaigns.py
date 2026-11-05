@@ -154,6 +154,11 @@ def store_images(folder, prepared):
 def template_plan(brief):
     """A truthful editable draft using only this brief; no API or media generation."""
     facts = list(brief["approved_claims"].items())
+    from .facts import normalized
+
+    cta_claims = [
+        key for key, fact in facts if normalized(brief["cta"]) == normalized(fact)
+    ]
 
     def fact_scene(index, seconds, fallback):
         if index >= len(facts):
@@ -245,6 +250,8 @@ def template_plan(brief):
                     if kind == "product_demo" and i == 1
                     else ids2
                     if kind == "product_demo" and i == 2
+                    else cta_claims
+                    if i == 4
                     else [],
                     footnote=note1
                     if kind == "product_demo" and i == 1

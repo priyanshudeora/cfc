@@ -25,9 +25,11 @@ def transcription_config(keys):
 
 class InputAnalyzer:
     def __init__(self, folder, keys):
-        self.folder, self.keys = Path(folder), keys
+        self.folder, self.keys = Path(folder).resolve(), keys
 
     def transcribe(self, source, folder):
+        source, folder = Path(source).resolve(), Path(folder).resolve()
+        folder.mkdir(parents=True, exist_ok=True)
         binary, model = transcription_config(self.keys)
         if (
             not binary
@@ -85,7 +87,7 @@ class InputAnalyzer:
         )
 
     def analyze(self, source, kind, probe):
-        source = Path(source)
+        source = Path(source).resolve()
         binary, model = transcription_config(self.keys)
         token = digest(
             [

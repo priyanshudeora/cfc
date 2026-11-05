@@ -44,8 +44,9 @@ SAFE_COPY = {
 
 
 def normalized(text):
+    text = re.sub(r"(?<!\w)[−-](?=\d)", "negative ", text.casefold())
     words = re.findall(
-        r"\d+(?:\.\d+)?|[^\W\d_]+", text.casefold().replace("-", " "), re.UNICODE
+        r"\d+(?:\.\d+)?|[+<>≥≤±%]|[^\W\d_]+", text.replace("-", " "), re.UNICODE
     )
     out, i = [], 0
     while i < len(words):
@@ -96,34 +97,52 @@ def normalized(text):
     return " ".join(aliases.get(word, word) for word in out)
 
 
+def action_ctas(brief):
+    """Recognize complete neutral action forms; never infer truth from keywords."""
+    brand, product, variant = (
+        normalized(brief.get(k, "")) for k in ["brand", "product", "variant"]
+    )
+    identities = {
+        " ".join(filter(None, parts))
+        for parts in [
+            (product,),
+            (brand, product),
+            (product, variant),
+            (brand, product, variant),
+        ]
+    } - {""}
+    # Short product references still name supplied identity words, rather than
+    # allowing arbitrary benefit text after an action verb.
+    identities |= {word for word in product.split() if not word.isdecimal()}
+    identities |= {
+        prefix + " " + identity
+        for prefix in ["the", "the new", "your"]
+        for identity in tuple(identities)
+    }
+    return {"shop now", "learn more", "explore the product", "see the product"} | {
+        verb + " " + identity
+        for verb in [
+            "explore",
+            "discover",
+            "meet",
+            "view",
+            "see",
+            "shop",
+            "try",
+            "learn more about",
+        ]
+        for identity in identities
+    }
+
+
 def copy_issues(plan, brief):
     facts = {
         key: normalized(value)
         for key, value in brief.get("approved_claims", {}).items()
     }
-    safe = {
-        normalized(value)
-        for value in SAFE_COPY | set(brief.get("approved_creative_copy", []))
-    }
+    safe = {normalized(value) for value in SAFE_COPY}
     safe |= {normalized(brief.get(key, "")) for key in ["brand", "product", "variant"]}
-    cta = normalized(brief.get("cta", ""))
-    cta_copy = brief.get("cta", "")
-    for key in ["brand", "product", "variant"]:
-        if brief.get(key):
-            cta_copy = re.sub(re.escape(brief[key]), " ", cta_copy, flags=re.I)
-    factual = re.search(
-        r"\b(?:warranty|lifetime|free|discount|save|hours?|minutes?|playback|battery|proven|certified|results?|guarantee|waterproof|anc)\b|[%₹$]",
-        cta_copy,
-        re.I,
-    )
-    identity_numbers = set(
-        re.findall(
-            r"\d+",
-            normalized(brief.get("product", "") + " " + brief.get("variant", "")),
-        )
-    )
-    if not factual and set(re.findall(r"\d+", cta)) <= identity_numbers:
-        safe.add(cta)
+    safe |= action_ctas(brief)
     issues = []
     for number, ad in enumerate(plan.ads, 1):
         for index, scene in enumerate(ad.scenes, 1):
@@ -136,16 +155,8 @@ def copy_issues(plan, brief):
                 matched = [
                     fact for fact in selected.values() if value == fact or fact in value
                 ]
-                # Headline shortening is allowed only when all of its words occur in a selected fact.
-                if (
-                    field == "headline"
-                    and selected
-                    and any(
-                        set(value.split()) <= set(fact.split())
-                        for fact in selected.values()
-                    )
-                ):
-                    continue
+                # Factual spans must retain the complete approved wording. Any
+                # shortening, reordered negation or dropped condition needs review.
                 if not matched:
                     issues.append(
                         f"Fact review required: ad {number}, scene {index}, {field}: {original}"

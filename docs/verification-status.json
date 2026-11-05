@@ -1,0 +1,82 @@
+{
+  "verified_on": "2026-11-05",
+  "scope": "Repository audit and local test execution; adapter existence is not integration proof.",
+  "tasks": [
+    {
+      "task": "External editing-app MCP",
+      "status": "pending",
+      "verification_evidence": "FFmpeg is the active editing engine; no external editor MCP connection is configured or verified.",
+      "remaining_dependency": "Future editor/MCP server integration and an actual editing/export test."
+    },
+    {
+      "task": "Jev integration",
+      "status": "pending",
+      "verification_evidence": "No Jev client or verified service connection; ordinary LangGraph/Python functions remain labelled as local code.",
+      "remaining_dependency": "Future service/SDK integration and verified request/tool-selection execution."
+    },
+    {
+      "task": "Automatic visual quality review",
+      "status": "pending",
+      "verification_evidence": "Technical/contract checks, source hashes and actual-video contact sheets exist. Product appearance, brand consistency and scene meaning are not automatically assessed.",
+      "remaining_dependency": "Vision-review implementation and evaluation; human approval remains required."
+    },
+    {
+      "task": "Word-level caption alignment",
+      "status": "pending",
+      "verification_evidence": "ASS/SRT segment timing is implemented; no forced alignment of individual words.",
+      "remaining_dependency": "A tested forced aligner and integration with local/API speech."
+    },
+    {
+      "task": "Actual AI footage generation",
+      "status": "blocked",
+      "verification_evidence": "ComfyUI queue adapter exists, but no API workflow/model is configured. Local GPU reports 6141 MiB; the current adapter threshold is 10 GiB. Mocked tests are not proof of inference.",
+      "remaining_dependency": "A compatible local server, model weights, workflow and suitable hardware; then real submit/poll/download/FFmpeg assembly verification."
+    },
+    {
+      "task": "Product-image-conditioned generation",
+      "status": "pending",
+      "verification_evidence": "Current adapter replaces prompt/seed placeholders; it does not upload or bind product images into the model. Hybrid mode overlays product images in FFmpeg.",
+      "remaining_dependency": "A genuine image-conditioned workflow, image upload/loader binding, and a verified generation run."
+    },
+    {
+      "task": "Speech-input transcription",
+      "status": "partial",
+      "verification_evidence": "Fresh Windows x64 installation of pinned whisper.cpp v1.9.2 + tiny.en succeeded; all three actual Kokoro MP4 exports were transcribed. Manual-transcript fallback is regression-tested. No real user recording was supplied.",
+      "remaining_dependency": "Verify a real user recording; other operating systems/languages need their own compatible build/model."
+    },
+    {
+      "task": "Complete local three-video demo and targeted revision",
+      "status": "implemented",
+      "verification_evidence": "Real Kokoro, original music, burned captions and supplied product images passed both complete checkpoint/export rounds. Revising video 3 retained identical MP4 hashes/cache hits for videos 1 and 2; speech was reused. Approvals were explicitly simulated in an isolated test campaign.",
+      "remaining_dependency": "Human review/approval before real advertising use; this was a technical workflow verification, not campaign-performance validation."
+    }
+  ],
+  "test_summary": {
+    "python": "3.14.7",
+    "passed": 72,
+    "live_api_credits_consumed": 0,
+    "notes": "13 third-party LangSmith deprecation warnings; FFmpeg and local Kokoro tests passed."
+  },
+  "changed_files": [
+    ".env.example",
+    "README.md",
+    "app_pages/architecture.py",
+    "app_pages/brief.py",
+    "docs/verification-status.json",
+    "scripts/setup_whisper.py",
+    "scripts/verify_local_demo.py",
+    "tests/test_app.py",
+    "tests/test_copy_and_response_recovery.py",
+    "tests/test_inputs_and_recovery.py",
+    "tests/test_rendering_and_connections.py",
+    "video_agent/campaigns.py",
+    "video_agent/config.py",
+    "video_agent/connections.py",
+    "video_agent/facts.py",
+    "video_agent/inputs.py",
+    "video_agent/planning.py",
+    "video_agent/rendering/voice.py",
+    "video_agent/service.py",
+    "video_agent/ui.py"
+  ]
+}

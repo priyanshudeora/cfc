@@ -1,5 +1,6 @@
 import json
 import streamlit as st
+from video_agent.config import ROOT
 from video_agent.ui import service, current_campaign
 
 api, cid = service(), current_campaign()
@@ -75,6 +76,24 @@ with st.container(border=True):
     st.markdown(
         "**Future:** external editing-application MCP and Jev integration. Neither is connected or represented by the local Python functions. Semantic product-appearance and advertising-performance review are not automated; human media review remains required."
     )
+    st.caption(
+        "Captions use timed segments, not word-level forced alignment. Hybrid product overlays do not establish image-conditioned generation."
+    )
+audit = json.loads(
+    (ROOT / "docs" / "verification-status.json").read_text(encoding="utf-8")
+)
+st.subheader("Verification status")
+st.caption(
+    "Repository audit dated "
+    + audit["verified_on"]
+    + ". This is recorded evidence, not a live provider-health check."
+)
+st.dataframe(
+    audit["tasks"],
+    hide_index=True,
+    width="stretch",
+    alt="Implementation status, verification evidence and remaining dependencies for eight audited capabilities",
+)
 with st.container(border=True):
     st.subheader("Application modules")
     st.code(

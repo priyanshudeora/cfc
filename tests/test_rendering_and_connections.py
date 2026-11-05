@@ -1,8 +1,38 @@
 import numpy as np
 import pytest
+from types import SimpleNamespace
+import sys
 from video_agent.config import Settings
 from video_agent.service import CampaignService
 from video_agent.connections import redact, check_provider
+
+
+def test_ort_telemetry_is_disabled_before_session_creation(monkeypatch):
+    from video_agent.rendering.voice import load_kokoro
+
+    calls = []
+
+    def session(*args, **kwargs):
+        assert calls == ["disabled"]
+        calls.append("session")
+        return object()
+
+    fake_ort = SimpleNamespace(
+        disable_telemetry_events=lambda: calls.append("disabled"),
+        SessionOptions=SimpleNamespace,
+        InferenceSession=session,
+    )
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    fake_kokoro = SimpleNamespace(
+        Kokoro=SimpleNamespace(from_session=lambda *a: "engine")
+    )
+    monkeypatch.setitem(sys.modules, "kokoro_onnx", fake_kokoro)
+    load_kokoro.cache_clear()
+    try:
+        assert load_kokoro("unused-test-path") == "engine"
+        assert calls == ["disabled", "session"]
+    finally:
+        load_kokoro.cache_clear()
 
 
 def test_credentials_are_redacted():
@@ -36,7 +66,7 @@ def test_api_check_displays_real_error_safely(monkeypatch):
     assert "voices_read" in result["body"]["detail"]["message"]
 
 
-def test_local_voice_engine_is_available_in_app(tmp_path):
+def test_local_voice_engine_is_available_in_app(tmp_path, monkeypatch):
     from video_agent.config import MODEL_FILES
     from test_workflow import make_campaign
 
@@ -46,6 +76,12 @@ def test_local_voice_engine_is_available_in_app(tmp_path):
             "Optional local voice integration check requires cached model files"
         )
     api = CampaignService(settings)
+    monkeypatch.setattr(
+        "requests.sessions.Session.request",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("Cached inference must not request network resources")
+        ),
+    )
     try:
         cid = make_campaign(api)
         engine = api.runtime(cid).renderer.notebook_kokoro()

@@ -15,6 +15,9 @@ VOICE_LOCK = threading.RLock()
 @lru_cache(maxsize=1)
 def load_kokoro(model_dir):
     import onnxruntime as ort
+
+    # Use the supported ORT API before constructing any inference sessions.
+    ort.disable_telemetry_events()
     from kokoro_onnx import Kokoro
 
     options = ort.SessionOptions()

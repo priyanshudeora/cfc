@@ -12,6 +12,14 @@ PROVIDERS = {
 }
 
 
+class ProviderResponseError(RuntimeError):
+    """An HTTP response arrived; this is not an ambiguous submission timeout."""
+
+    def __init__(self, message, payload=None, status=None):
+        super().__init__(message)
+        self.payload, self.status = payload, status
+
+
 def redact(value, keys):
     private = {
         "api_key",
@@ -62,14 +70,22 @@ def api_json(service, method, url, **kwargs):
             429: "Quota or rate limit reached. Retry later.",
             503: "The model is busy. Retry later or edit the saved draft.",
         }
-        raise RuntimeError(
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        raise ProviderResponseError(
             f"{service}: HTTP {response.status_code}. "
-            + hints.get(response.status_code, "Request rejected.")
+            + hints.get(response.status_code, "Request rejected."),
+            payload=payload,
+            status=response.status_code,
         )
     try:
         return response.json()
     except ValueError:
-        raise RuntimeError(f"{service}: response was not valid JSON.") from None
+        raise ProviderResponseError(
+            f"{service}: response was not valid JSON."
+        ) from None
 
 
 def check_provider(service, keys, model="gemini-2.5-flash"):

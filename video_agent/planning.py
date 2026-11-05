@@ -12,7 +12,7 @@ from .models import *
 from .prompts import *
 from .validation import *
 from .storage import read_json, save_json, digest
-from .connections import api_json
+from .connections import api_json, ProviderResponseError
 from .control import DEFAULT_LIMITS
 
 
@@ -28,7 +28,7 @@ class Planner:
     def gemini_request(self, payload):
         key = self.keys.get("GEMINI_API_KEY") or ""
         if not key:
-            raise RuntimeError("Gemini API key missing")
+            raise ValueError("Gemini API key missing")
         return api_json(
             "Gemini",
             "POST",
@@ -128,6 +128,7 @@ class Planner:
             )
         )
         key = "model:" + digest([self.model, prompt, schema.__name__, system])
+        attempt, allowance_key = 1, ""
         if self.control:
             self.control.task_start(self.cid, key, "planning", max_attempts=2)
             attempt = self.control.task(self.cid, key)["attempts"]
@@ -146,6 +147,57 @@ class Planner:
                 self.control.task_update(self.cid, key, "paused", error=str(error))
                 raise
             self.control.task_update(self.cid, key, "submitting")
+
+        def record_received(response, status, error="", received=True):
+            usage = (
+                response.get("usage", response.get("usage_metadata", {}))
+                if isinstance(response, dict)
+                else {}
+            )
+            usage = usage if isinstance(usage, dict) else {}
+            total = usage.get("total_tokens", usage.get("totalTokens"))
+            if total is None and any(
+                k in usage for k in ["total_input_tokens", "total_output_tokens"]
+            ):
+                parts = [
+                    usage.get(k, 0)
+                    for k in ["total_input_tokens", "total_output_tokens"]
+                ]
+                if all(
+                    isinstance(v, (int, float))
+                    and not isinstance(v, bool)
+                    and 0 <= v <= 1_000_000_000
+                    for v in parts
+                ):
+                    total = sum(parts)
+            estimated = (
+                not isinstance(total, (int, float))
+                or isinstance(total, bool)
+                or not 0 <= total <= 1_000_000_000
+            )
+            total = expected if estimated else int(total)
+            output = dict(
+                usage=usage,
+                model_tokens=total,
+                estimated_usage=estimated,
+                response_received=received,
+                status=status,
+            )
+            if self.control:
+                self.control.settle(
+                    self.cid,
+                    allowance_key,
+                    charge({"model_tokens": total}, brief.get("usage_rates")),
+                )
+                self.control.task_update(
+                    self.cid, key, status, output=output, error=error
+                )
+            save_json(
+                self.folder / "model_responses" / (digest([key, attempt]) + ".json"),
+                dict(output, error=error),
+            )
+            return usage, total, estimated
+
         try:
             result = self.gemini_request(
                 {
@@ -161,20 +213,50 @@ class Planner:
                     },
                 }
             )
+        except ProviderResponseError as error:
+            status = "response_failed" if error.status else "validation_failed"
+            record_received(error.payload, status, str(error))
+            raise ValueError(
+                f"Gemini response failed validation or was rejected: {error}. A bounded retry is available within the remaining allowance."
+            ) from None
+        except ValueError as error:
+            # Local pre-dispatch errors (such as a missing key) have no usage.
+            record_received(
+                {"usage": {"total_tokens": 0}}, "failed", str(error), received=False
+            )
+            raise
         except Exception as error:
             if self.control:
                 self.control.task_update(self.cid, key, "unknown", error=str(error))
             raise
-        text = " ".join(
-            (
+        # Settle received usage before parsing. Invalid copy must never strand a
+        # submitting task or be confused with an unknown network outcome.
+        usage, total, estimated_usage = record_received(result, "response_received")
+        try:
+            if not isinstance(result, dict):
+                raise ValueError("response envelope must be an object")
+            text = " ".join(
                 b.get("text", "")
-                for s in result.get("steps", [])
-                if s.get("type") == "model_output"
-                for b in s.get("content", [])
+                for step in result.get("steps", [])
+                if step.get("type") == "model_output"
+                for b in step.get("content", [])
                 if b.get("type") == "text"
             )
-        )
-        parsed = schema.model_validate_json(text)
+            if not text.strip():
+                raise ValueError("response contains no model text")
+            parsed = schema.model_validate_json(text)
+        except (ValueError, TypeError, AttributeError, KeyError):
+            detail = (
+                "Response JSON was empty, incomplete or did not match "
+                + schema.__name__
+                + "."
+            )
+            record_received(result, "validation_failed", detail)
+            raise ValueError(
+                "Gemini response validation failed: "
+                + detail
+                + " Retry the interrupted step; at most two submissions are permitted and remaining allowance is checked first."
+            ) from None
         manifest = self.folder / "image-analysis.json"
         if manifest.exists() and schema in [CampaignPlan, AdPlan]:
             analysis = read_json(manifest)
@@ -189,27 +271,16 @@ class Planner:
                 for scene in ad.scenes
             ]
             save_json(manifest, analysis)
-        usage = result.get("usage", result.get("usage_metadata", {}))
-        total = usage.get("total_tokens") or usage.get("totalTokens")
-        if total is None:
-            total = (
-                usage.get("total_input_tokens", 0) + usage.get("total_output_tokens", 0)
-            ) or expected
-        if self.control:
-            self.control.settle(
-                self.cid,
-                allowance_key,
-                charge({"model_tokens": int(total)}, brief.get("usage_rates")),
-            )
-            self.control.task_update(
-                self.cid, key, "complete", output=dict(cache=str(cache), usage=usage)
-            )
         save_json(
             cache,
             dict(
-                parsed=parsed.model_dump(), usage=usage, estimated_usage=not bool(usage)
+                parsed=parsed.model_dump(), usage=usage, estimated_usage=estimated_usage
             ),
         )
+        if self.control:
+            self.control.task_update(
+                self.cid, key, "complete", output=dict(cache=str(cache), usage=usage)
+            )
         if total > expected:
             raise ValueError(
                 "Actual token usage exceeded the reservation; review the campaign allowance before continuing."

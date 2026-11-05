@@ -354,6 +354,24 @@ def input_panel(api, cid, snapshot):
             key="input_text_" + cid,
             max_chars=20000,
         )
+        if text.strip() and (upload or recording):
+            if st.button(
+                "Save manual transcript as text",
+                key="save_manual_transcript_" + cid,
+                disabled=snapshot["busy"],
+            ):
+                try:
+                    api.add_input(
+                        cid,
+                        "manual-transcript.txt",
+                        text.encode(),
+                        "text",
+                        snapshot["signature"],
+                    )
+                except (ValueError, RuntimeError) as error:
+                    st.error(str(error))
+                else:
+                    st.rerun()
         if st.button(
             "Analyze and save input",
             key="analyze_input_" + cid,
