@@ -34,6 +34,49 @@ FORMAT_NAMES = {
 }
 
 
+def workflow_step(snapshot):
+    """Present persisted state without treating page navigation as progress."""
+    state, stage = snapshot.get("state", {}), snapshot.get("stage", "")
+    if state.get("status") == "complete" or stage == "export":
+        return "Export"
+    if stage in {
+        "understand",
+        "research",
+        "plan",
+        "approve_plan",
+        "save_approved_plan",
+        "ready_sample",
+    }:
+        return "Plan"
+    if (
+        stage
+        in {
+            "sample",
+            "approve_sample",
+            "prepare_assets",
+            "batch",
+            "approve_final",
+            "revise_sample",
+            "revise_selected",
+        }
+        or state.get("sample")
+        or state.get("outputs")
+    ):
+        return "Video review"
+    return "Plan" if state.get("brief") else "Brief"
+
+
+def workflow_indicator(snapshot):
+    current = workflow_step(snapshot)
+    steps = ["Brief", "Plan", "Video review", "Export"]
+    st.caption("Saved workflow")
+    st.markdown(
+        " → ".join("**" + step + "**" if step == current else step for step in steps)
+    )
+    if snapshot["state"].get("status") == "cancelled":
+        st.caption("Campaign cancelled · files retained")
+
+
 @st.cache_resource(max_entries=1)
 def get_service(data_dir=None):
     from .service import CampaignService
@@ -52,6 +95,11 @@ def service():
     return get_service(os.environ.get("CFC_DATA_DIR"))
 
 
+def campaign_changed():
+    st.session_state["new_campaign"] = False
+    st.session_state.pop("edit_campaign", None)
+
+
 def current_campaign():
     cid = st.session_state.get("active_campaign")
     if not cid:
@@ -64,17 +112,11 @@ def current_campaign():
 
 def stage_banner(snapshot):
     if snapshot["busy"]:
-        st.info(
-            "A background job is running. Progress appears below; review actions return when it finishes.",
-            title="Work in progress",
-            icon=":material/pending:",
+        st.caption(
+            "Working in the background. Review actions return when the job finishes."
         )
     elif snapshot["state"].get("status") == "complete":
-        st.success(
-            "Your approved MP4s, captions and campaign bundle are ready.",
-            title="Ready to share",
-            icon=":material/task_alt:",
-        )
+        st.caption("Final approval saved · exports ready")
     elif snapshot["state"].get("status") == "cancelled":
         st.info(
             "This campaign is cancelled. Its saved files remain available.",
@@ -121,7 +163,7 @@ def activity(cid):
             )
     if job["status"] in ["failed", "interrupted"]:
         st.error(job["error"], title="The job stopped", icon=":material/error:")
-    with st.expander("Activity · " + job["title"], expanded=job["status"] == "running"):
+    with st.expander("Job details · " + job["title"]):
         for message in job.get("events", [])[-10:]:
             st.text(message)
         if not job.get("events"):
@@ -182,7 +224,7 @@ def file_bytes(path, modified):
     return Path(path).read_bytes()
 
 
-def download(label, path, name=None, mime=None, key=None):
+def download(label, path, name=None, mime=None, key=None, primary=False):
     path = Path(path)
     if path.is_file():
         st.download_button(
@@ -193,6 +235,7 @@ def download(label, path, name=None, mime=None, key=None):
             key=key,
             icon=":material/download:",
             width="stretch",
+            type="primary" if primary else "secondary",
         )
 
 
@@ -290,12 +333,14 @@ def footage_upload(api, cid, snapshot):
 
 
 def usage_panel(snapshot):
-    st.caption("Media estimate: " + str(snapshot.get("estimate", {})))
-    if snapshot.get("usage") or snapshot.get("tasks"):
-        with st.expander("Usage, reservations and durable tasks"):
-            st.json(
-                dict(usage=snapshot.get("usage", []), tasks=snapshot.get("tasks", []))
+    with st.expander("Usage estimate & technical details"):
+        st.json(
+            dict(
+                estimate=snapshot.get("estimate", {}),
+                usage=snapshot.get("usage", []),
+                tasks=snapshot.get("tasks", []),
             )
+        )
 
 
 def fact_review_panel(api, cid, snapshot):
@@ -313,7 +358,8 @@ def fact_review_panel(api, cid, snapshot):
             "The proposed draft contains new or uncertain statements. Verify them before approving them as product facts.",
             title="Separate fact review required",
         )
-        st.json(pending.get("issues", []))
+        for issue in dict.fromkeys(pending.get("issues", [])):
+            st.caption(issue)
         with st.expander("Full proposed draft for fact review"):
             st.json(pending.get("plan", {}))
         if st.checkbox(

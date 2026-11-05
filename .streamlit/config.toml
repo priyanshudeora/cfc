@@ -1,21 +1,26 @@
 [theme]
 base = "light"
-primaryColor = "#BD3F32"
+primaryColor = "#256B65"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F3F5F8"
-textColor = "#172337"
+secondaryBackgroundColor = "#F4F6F7"
+textColor = "#243238"
 borderColor = "#E3E7EE"
 font = "sans serif"
-baseRadius = "large"
-buttonRadius = "large"
+baseFontSize = 15
+headingFontSizes = ["1.75rem", "1.4rem", "1.15rem", "1rem", "1rem", "1rem"]
+metricValueFontSize = "1.65rem"
+baseRadius = "medium"
+buttonRadius = "medium"
 showWidgetBorder = true
 showSidebarBorder = true
-paddingTop = "2.5rem"
-paddingBottom = "3rem"
+paddingTop = "1.5rem"
+paddingBottom = "2rem"
 
 [theme.sidebar]
 backgroundColor = "#F7F8FA"
 secondaryBackgroundColor = "#FFFFFF"
+paddingTop = "1.5rem"
+paddingBottom = "1rem"
 
 [server]
 address = "127.0.0.1"

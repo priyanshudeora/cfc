@@ -1,0 +1,5 @@
+# Optional visual QA only; not required to run the app or normal pytest suite.
+-r requirements-dev.txt
+
+# Real desktop/mobile browser rendering using the locally installed Microsoft Edge.
+playwright==1.56.0

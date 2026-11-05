@@ -4,6 +4,8 @@ A local Streamlit application for planning and producing three separate 20-secon
 
 **FFmpeg is the editing engine.** It performs clip selection, zoom/pan, supported masks, cuts/fades, audio mixing/ducking, caption burning and MP4 export. Pillow supplies static brand graphics; NumPy synthesizes an original instrumental bed. Image-based motion graphics are described as motion graphics, not AI-generated footage.
 
+The interface uses sidebar navigation for Overview, Campaign brief, Plan & approvals and Video review, with API connections and Architecture under Settings & tools. The saved-stage indicator is informational; changing pages does not authorize work. Optional brief inputs, technical details and change requests are collapsed to keep the main workflow focused. Video review includes a larger portrait player, explicit review checklists and a prominent ZIP download after final approval. [Frontend verification, screenshots and reproduction steps](docs/frontend-verification.md) distinguish automated behavior tests from actual browser inspection.
+
 ## Windows CMD setup
 
 The supported application interpreter is **Python 3.14**, tested with **3.14.7**. The entry point checks this version. Local ComfyUI and whisper.cpp are optional separate installations, with their own dependencies.

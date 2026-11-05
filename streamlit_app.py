@@ -10,33 +10,45 @@ if sys.version_info[:2] != (3, 14):
     st.error("Run this app with the project .venv using Python 3.14.7.")
     st.stop()
 
-from video_agent.ui import service
+from video_agent.ui import service, workflow_indicator, campaign_changed
 
 page = st.navigation(
-    [
-        st.Page(
-            "app_pages/overview.py",
-            title="Overview",
-            icon=":material/space_dashboard:",
-            default=True,
-        ),
-        st.Page(
-            "app_pages/brief.py", title="Campaign brief", icon=":material/edit_note:"
-        ),
-        st.Page(
-            "app_pages/plan.py", title="Plan & approvals", icon=":material/fact_check:"
-        ),
-        st.Page("app_pages/videos.py", title="Video review", icon=":material/movie:"),
-        st.Page(
-            "app_pages/connections.py", title="API connections", icon=":material/cable:"
-        ),
-        st.Page(
-            "app_pages/architecture.py",
-            title="Architecture",
-            icon=":material/account_tree:",
-        ),
-    ],
-    position="top",
+    {
+        "": [
+            st.Page(
+                "app_pages/overview.py",
+                title="Overview",
+                icon=":material/space_dashboard:",
+                default=True,
+            ),
+            st.Page(
+                "app_pages/brief.py",
+                title="Campaign brief",
+                icon=":material/edit_note:",
+            ),
+            st.Page(
+                "app_pages/plan.py",
+                title="Plan & approvals",
+                icon=":material/fact_check:",
+            ),
+            st.Page(
+                "app_pages/videos.py", title="Video review", icon=":material/movie:"
+            ),
+        ],
+        "Settings & tools": [
+            st.Page(
+                "app_pages/connections.py",
+                title="API connections",
+                icon=":material/cable:",
+            ),
+            st.Page(
+                "app_pages/architecture.py",
+                title="Architecture",
+                icon=":material/account_tree:",
+            ),
+        ],
+    },
+    position="sidebar",
 )
 
 api = service()
@@ -58,25 +70,30 @@ if st.session_state["active_campaign"] not in options:
     st.session_state.pop("edit_campaign", None)
 
 with st.sidebar:
-    st.title("CFC studio", icon=":material/slow_motion_video:")
-    st.caption("A brief. Three stories. Your approval.")
-    st.divider()
+    st.markdown("**CFC studio**")
     if options:
         st.selectbox(
-            "Open campaign", options, format_func=names.get, key="active_campaign"
+            "Current campaign",
+            options,
+            format_func=names.get,
+            key="active_campaign",
+            on_change=campaign_changed,
         )
     if st.button(
         "New campaign",
         icon=":material/add:",
         width="stretch",
         key="new_campaign_button",
+        type="primary",
     ):
         st.session_state["new_campaign"] = True
         st.switch_page("app_pages/brief.py")
     st.divider()
-    st.caption("20 seconds · 9:16 · English")
-    st.caption("Local voice, original music and exact product images.")
+    if st.session_state.get("active_campaign"):
+        workflow_indicator(api.snapshot(st.session_state["active_campaign"]))
+    else:
+        st.caption("Brief → Plan → Video review → Export")
+    st.caption("3 videos · 20 seconds each · 9:16")
 
-st.caption("CFC VIDEO STUDIO  /  CREATIVE WORKSPACE")
 st.title(page.title, icon=page.icon)
 page.run()

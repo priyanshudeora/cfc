@@ -65,154 +65,192 @@ else:
     )
     if editing:
         st.info(
-            "Saving the brief replaces the draft with a local starting plan and clears active approvals and previews. Your previous files stay on disk."
+            "Saving creates a new plan that needs approval again. Previous video files are retained."
         )
     with st.form("edit_campaign_brief" if editing else "create_campaign", border=True):
+        details, assets = st.columns([1.45, 1], gap="large")
+        with details:
+            st.markdown("**Product & message**")
+            if not editing:
+                name = st.text_input(
+                    "Campaign name",
+                    max_chars=100,
+                    key="campaign_name",
+                    placeholder="Summer product launch",
+                )
+            product_col, brand_col = st.columns(2)
+            product = product_col.text_input(
+                "Product name",
+                value=values.get("product", ""),
+                max_chars=80,
+                key="product_name",
+                placeholder="Exact product name",
+            )
+            brand = brand_col.text_input(
+                "Brand (optional)",
+                value=values.get("brand", ""),
+                max_chars=80,
+                key="brand_name",
+            )
+            audience = st.text_input(
+                "Audience",
+                value=values.get("audience", ""),
+                max_chars=300,
+                key="campaign_audience",
+                placeholder="Who should this campaign reach?",
+            )
+            goal = st.text_area(
+                "Campaign goal",
+                value=values.get(
+                    "goal",
+                    "Attract attention and encourage viewers to explore the product.",
+                ),
+                height=80,
+                max_chars=800,
+                key="campaign_goal",
+            )
+            claims = st.text_area(
+                "Approved product facts \u00b7 one per line (optional)",
+                value="\n".join(values.get("approved_claims", {}).values()),
+                height=110,
+                key="campaign_claims",
+                help="Only verified facts can appear as product claims. Preserve qualifiers such as 'up to'. Up to 12 facts, 160 characters each.",
+            )
+            cta = st.text_input(
+                "Ending call to action",
+                value=values.get("cta", ""),
+                max_chars=90,
+                key="campaign_cta",
+                placeholder="Explore [product name].",
+            )
+        with assets:
+            st.markdown("**Product images**")
+            st.caption(
+                "These images appear in the videos. Use clear views of the exact product."
+            )
+            if not editing:
+                main = st.file_uploader(
+                    "Main product image",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    key="main_product_image",
+                )
+                detail = st.file_uploader(
+                    "Second angle or detail (optional)",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    key="detail_product_image",
+                )
+                st.caption(
+                    "You can plan without images; generation waits for the required assets."
+                )
+            else:
+                images = [
+                    a
+                    for a in api.repository.assets(cid).values()
+                    if a["use"] == "identity"
+                ]
+                if images:
+                    st.image(
+                        images[0]["path"],
+                        width=240,
+                        alt="Saved product image for "
+                        + values.get("product", "this campaign"),
+                    )
+                st.caption(
+                    "Saved images stay with this campaign. Replace them from the saved brief view."
+                )
         if not editing:
-            name = st.text_input(
-                "Campaign name",
-                max_chars=100,
-                key="campaign_name",
-                placeholder="Summer product launch",
+            with assets:
+                starting = st.segmented_control(
+                    "Planning",
+                    ["Local draft", "AI concepts"],
+                    default="Local draft",
+                    key="starting_point",
+                )
+                st.caption(
+                    "Local draft uses no API. AI concepts use Gemini account quota. Both need approval."
+                )
+                voice = st.segmented_control(
+                    "Voice",
+                    ["Local voice", "ElevenLabs"],
+                    default="Local voice",
+                    key="voice_provider",
+                )
+                st.caption(
+                    "Local voice runs here. ElevenLabs uses account credits and the server's allowance."
+                )
+                with st.expander("ElevenLabs voice details"):
+                    voice_id = st.text_input(
+                        "ElevenLabs voice ID", max_chars=100, key="elevenlabs_voice"
+                    )
+                    st.caption(
+                        "Only required for ElevenLabs. Check your account's license for the intended use."
+                    )
+        with st.expander("Creative direction (optional)"):
+            style = st.text_input(
+                "Creative style",
+                value=values.get("style", "Energetic, clear and realistic"),
+                max_chars=300,
+                key="campaign_style",
             )
-        left, right = st.columns(2)
-        product = left.text_input(
-            "Product name",
-            value=values.get("product", ""),
-            max_chars=80,
-            key="product_name",
-            placeholder="Your exact product name",
-        )
-        brand = right.text_input(
-            "Brand (optional)",
-            value=values.get("brand", ""),
-            max_chars=80,
-            key="brand_name",
-        )
-        variant = st.text_input(
-            "Model, colour or variant (optional)",
-            value=values.get("variant", ""),
-            max_chars=100,
-            key="product_variant",
-        )
-        audience = st.text_input(
-            "Audience",
-            value=values.get("audience", ""),
-            max_chars=300,
-            key="campaign_audience",
-            placeholder="Who are you trying to reach?",
-        )
-        goal = st.text_area(
-            "Campaign goal",
-            value=values.get(
-                "goal",
-                "Attract attention and encourage viewers to explore the product.",
-            ),
-            max_chars=800,
-            key="campaign_goal",
-        )
-        cta = st.text_input(
-            "Ending call to action",
-            value=values.get("cta", ""),
-            max_chars=90,
-            key="campaign_cta",
-            placeholder="Leave blank for: Explore [product name].",
-        )
-        claims = st.text_area(
-            "Approved product facts · one per line (optional)",
-            value="\n".join(values.get("approved_claims", {}).values()),
-            height=150,
-            key="campaign_claims",
-            help="Only these facts can appear as product claims. Include qualifiers such as 'up to'. Maximum 12 facts, 160 characters each.",
-        )
-        style = st.text_input(
-            "Creative style",
-            value=values.get("style", "Energetic, clear and realistic"),
-            max_chars=300,
-            key="campaign_style",
-        )
-        product_url = st.text_input(
-            "Official product page (optional)",
-            value=values.get("product_url", ""),
-            key="product_url",
-            help="Context for planning. It does not automatically authorize claims or download page assets.",
-        )
-        competitors = st.text_area(
-            "Comparable products · one per line (optional)",
-            value="\n".join(values.get("competitors", [])),
-            key="campaign_competitors",
-            help="Up to three competitors for optional Tavily research.",
-        )
-        accent = st.color_picker(
-            "Brand accent colour",
-            value=values.get("accent_color", "#00AABD"),
-            key="brand_accent",
-        )
-        use_footage = st.checkbox(
-            "Use my own lifestyle footage in the story video",
-            value=values.get("use_footage", False),
-            key="use_lifestyle_footage",
-        )
-        st.caption(
-            "Leave this off for an image-based campaign. If selected, upload the planned licensed clips before rendering the story video."
-        )
+            variant = st.text_input(
+                "Model, colour or variant",
+                value=values.get("variant", ""),
+                max_chars=100,
+                key="product_variant",
+            )
+            product_url = st.text_input(
+                "Official product page",
+                value=values.get("product_url", ""),
+                key="product_url",
+                help="Planning context only. Page content does not automatically authorize product claims.",
+            )
+            accent = st.color_picker(
+                "Brand accent colour",
+                value=values.get("accent_color", "#00AABD"),
+                key="brand_accent",
+            )
+        with st.expander("Competitor research (optional)"):
+            competitors = st.text_area(
+                "Comparable products \u00b7 one per line",
+                value="\n".join(values.get("competitors", [])),
+                height=80,
+                key="campaign_competitors",
+            )
+            if not editing:
+                research = st.checkbox(
+                    "Research these competitors", value=False, key="refresh_research"
+                )
+            st.caption(
+                "Up to three products. Research uses Tavily account quota and provides context, not approved claims."
+            )
         if not editing:
-            st.markdown("### Product assets")
-            main = st.file_uploader(
-                "Main product image",
-                type=["png", "jpg", "jpeg", "webp"],
-                key="main_product_image",
-            )
-            detail = st.file_uploader(
-                "Second angle or detail image (optional)",
-                type=["png", "jpg", "jpeg", "webp"],
-                key="detail_product_image",
-            )
-            refs = st.file_uploader(
-                "Style reference images (optional, up to five)",
-                type=["png", "jpg", "jpeg", "webp"],
-                accept_multiple_files=True,
-                key="style_reference_images",
-            )
-            st.caption(
-                "Planning can start without images. Add product identity images before generation. Style references guide planning and do not become ad frames."
-            )
-            starting = st.segmented_control(
-                "Starting point",
-                ["Local template", "New AI concepts"],
-                default="Local template",
-                key="starting_point",
+            with st.expander("Reference images (optional)"):
+                refs = st.file_uploader(
+                    "Style references \u00b7 up to five images",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    accept_multiple_files=True,
+                    key="style_reference_images",
+                )
+                st.caption(
+                    "References guide planning. They are not used as final video footage. Add reference video or a spoken brief after saving the campaign."
+                )
+        with st.expander("Lifestyle footage (optional)"):
+            use_footage = st.checkbox(
+                "Use my own lifestyle footage in the story video",
+                value=values.get("use_footage", False),
+                key="use_lifestyle_footage",
             )
             st.caption(
-                "Local template: no API calls. New AI concepts: Gemini uses your account quota. Both require your approval."
-            )
-            voice = st.segmented_control(
-                "Voice",
-                ["Local Kokoro · free", "ElevenLabs · API"],
-                default="Local Kokoro · free",
-                key="voice_provider",
-            )
-            voice_id = st.text_input(
-                "ElevenLabs voice ID (only for the API voice)",
-                max_chars=100,
-                key="elevenlabs_voice",
-            )
-            st.caption(
-                "Local voice runs on your computer. ElevenLabs uses account credits; free-tier output requires non-commercial use and attribution."
-            )
-            research = st.checkbox(
-                "Research the listed competitors with Tavily",
-                value=False,
-                key="refresh_research",
+                "If enabled, you must upload the planned licensed clips in Campaign brief after saving. The story video cannot render until its footage is available. Reference media does not satisfy this requirement."
             )
         st.caption(
-            "Output: three separate 20-second, 1080 × 1920 MP4s — product demo, lifestyle story and product reveal — with English voice, music and captions."
+            "3 portrait videos \u00b7 20 seconds each \u00b7 English voice, music and captions. Media generation starts only after plan approval."
         )
         submitted = st.form_submit_button(
             "Save brief and reset plan" if editing else "Create campaign",
             type="primary",
             icon=":material/arrow_forward:",
-            width="stretch",
+            width="content",
             disabled=bool(snapshot and snapshot["busy"]),
         )
     if submitted:
@@ -239,10 +277,8 @@ else:
                     name,
                     audience,
                     goal,
-                    "ai" if starting == "New AI concepts" else "template",
-                    "elevenlabs"
-                    if voice == "ElevenLabs · API"
-                    else "local_kokoro_notebook",
+                    "ai" if starting == "AI concepts" else "template",
+                    "elevenlabs" if voice == "ElevenLabs" else "local_kokoro_notebook",
                     voice_id,
                     research,
                     **{
@@ -266,3 +302,10 @@ else:
     if editing and st.button("Cancel brief edit", key="cancel_brief_edit"):
         st.session_state.pop("edit_campaign", None)
         st.rerun()
+    if (
+        not editing
+        and cid
+        and st.button("Cancel new campaign", key="cancel_new_campaign")
+    ):
+        st.session_state["new_campaign"] = False
+        st.switch_page("app_pages/overview.py")

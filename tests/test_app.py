@@ -137,6 +137,23 @@ def test_creation_has_no_usage_widgets_and_uses_backend_defaults(app):
     assert brief["usage_rates"] == {} and brief["planning_model"] == "gemini-2.5-flash"
 
 
+def test_creation_preserves_provider_selection_without_calling_it(app, monkeypatch):
+    at, api = app
+    calls = []
+
+    def capture(*args, **kwargs):
+        calls.append(args)
+        raise ValueError("Captured configuration; no provider dispatched")
+
+    monkeypatch.setattr(api, "create", capture)
+    at.button(key="new_campaign_button").click().run()
+    at.segmented_control(key="starting_point").set_value("AI concepts")
+    at.segmented_control(key="voice_provider").set_value("ElevenLabs")
+    at.text_input(key="elevenlabs_voice").set_value("example-voice")
+    next(w for w in at.form_submit_button if w.label == "Create campaign").click().run()
+    assert not at.exception and calls[0][3:6] == ("ai", "elevenlabs", "example-voice")
+
+
 def test_editing_preserves_hidden_backend_settings(app):
     from test_workflow import make_campaign
     from video_agent.control import DEFAULT_LIMITS
@@ -188,6 +205,100 @@ def test_manual_transcript_can_be_saved_with_a_recording_still_selected(
     assert (
         analyses[-1]["kind"] == "text"
         and analyses[-1]["text"] == "My manually entered transcript."
+    )
+
+
+def test_video_review_approvals_switching_and_export_ui(app):
+    at, api = app
+    cid = at.session_state["active_campaign"]
+    at.switch_page("app_pages/videos.py").run()
+    snap = api.snapshot(cid)
+    assert at.button(key="approve_sample_" + snap["signature"]).disabled
+    at.checkbox(key="media_checked_" + snap["signature"]).check().run()
+    at.button(key="approve_sample_" + snap["signature"]).click().run()
+    api.jobs.wait(cid)
+    at.run()
+    snap = api.snapshot(cid)
+    assert snap["stage"] == "approve_final" and not at.exception
+    at.segmented_control(key="preview_" + cid).set_value(2).run()
+    assert any(
+        api.snapshot(cid)["state"]["outputs"][2]["title"] == s.value
+        for s in at.subheader
+    )
+    assert at.button(key="approve_final_" + snap["signature"]).disabled
+    at.checkbox(key="final_checked_" + snap["signature"]).check().run()
+    at.button(key="approve_final_" + snap["signature"]).click().run()
+    api.jobs.wait(cid)
+    at.run()
+    assert not at.exception and api.snapshot(cid)["state"]["status"] == "complete"
+    assert any(
+        d.label == "Download the full campaign" for d in at.get("download_button")
+    )
+
+
+def test_missing_video_cannot_be_approved_in_ui(app):
+    at, api = app
+    cid = at.session_state["active_campaign"]
+    snap = api.snapshot(cid)
+    Path(snap["state"]["sample"]["video"]).unlink()
+    at.switch_page("app_pages/videos.py").run()
+    snap = api.snapshot(cid)
+    assert not at.exception
+    assert at.button(key="approve_sample_" + snap["signature"]).disabled
+    assert any("MP4 is missing" in e.value for e in at.error)
+
+
+def test_missing_captions_block_final_export_approval(app):
+    from test_workflow import perform
+
+    at, api = app
+    cid = at.session_state["active_campaign"]
+    snap = perform(api, cid, "approve")
+    Path(snap["state"]["outputs"][2]["captions"]).unlink()
+    at.switch_page("app_pages/videos.py").run()
+    snap = api.snapshot(cid)
+    assert not at.exception
+    assert at.checkbox(key="final_checked_" + snap["signature"]).disabled
+    assert at.button(key="approve_final_" + snap["signature"]).disabled
+    assert any("caption file is missing" in e.value for e in at.warning)
+
+
+def test_local_revision_routes_selected_video_to_timeline(app):
+    from test_workflow import perform
+
+    at, api = app
+    cid = at.session_state["active_campaign"]
+    snap = perform(api, cid, "approve")
+    at.switch_page("app_pages/videos.py").run()
+    at.segmented_control(key="preview_" + cid).set_value(2).run()
+    at.button(key="local_edit_" + snap["signature"] + "2").click().run()
+    assert not at.exception
+    assert at.segmented_control(key="plan_detail_" + cid).value == "Timeline"
+    assert at.selectbox(key="timeline_ad_" + cid).value == 2
+
+
+@pytest.mark.parametrize(
+    "stage,status,expected",
+    [
+        ("approve_plan", "awaiting_plan_approval", "Plan"),
+        ("ready_sample", "ready_to_generate_sample", "Plan"),
+        ("sample", "rendering", "Video review"),
+        ("approve_final", "awaiting_final_approval", "Video review"),
+        ("export", "exporting", "Export"),
+        ("", "complete", "Export"),
+    ],
+)
+def test_workflow_indicator_uses_saved_stage(stage, status, expected):
+    from video_agent.ui import workflow_step
+
+    assert (
+        workflow_step(
+            {
+                "stage": stage,
+                "state": {"brief": {"product": "Bottle"}, "status": status},
+            }
+        )
+        == expected
     )
 
 

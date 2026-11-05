@@ -39,33 +39,28 @@ with st.container(horizontal=True):
         "Approved and saved" if snapshot["approved"] else "Awaiting approval",
         color="green" if snapshot["approved"] else "orange",
     )
-    st.caption(
-        "FFmpeg editing · Local or account-metered voice · Allowances saved with approval"
-    )
-usage_panel(snapshot)
 if snapshot.get("missing_assets"):
     st.info(
         "Missing planned assets: "
         + ", ".join(snapshot["missing_assets"])
         + ". Add them in Campaign brief before generation."
     )
-st.markdown(state["plan"]["summary"])
+with st.expander("Campaign direction"):
+    st.markdown(state["plan"]["summary"])
 
 for col, ad in zip(st.columns(3), state["plan"]["ads"]):
     with col.container(border=True, height="stretch"):
         st.caption(FORMAT_NAMES[ad["video_type"]].upper())
         st.subheader(ad["title"])
         st.markdown(ad["concept"])
-        st.divider()
-        st.caption("OPENING HOOK")
-        st.markdown("**" + ad["scenes"][0]["headline"] + "**")
+        st.caption("Opening · " + ad["scenes"][0]["headline"])
 
 if snapshot["stage"] == "approve_plan":
     if st.button(
         "Approve plan and save",
         type="primary",
         icon=":material/task_alt:",
-        width="stretch",
+        width="content",
         disabled=snapshot["busy"],
         key="approve_plan_" + token,
     ):
@@ -75,7 +70,7 @@ elif snapshot["stage"] == "ready_sample":
         "Generate representative sample",
         type="primary",
         icon=":material/movie:",
-        width="stretch",
+        width="content",
         disabled=snapshot["busy"]
         or not snapshot["approved"]
         or bool(snapshot.get("missing_assets")),
@@ -84,7 +79,10 @@ elif snapshot["stage"] == "ready_sample":
         action(api, cid, "generate", snapshot)
 else:
     if st.button(
-        "Continue to video review", icon=":material/arrow_forward:", width="stretch"
+        "Continue to video review",
+        type="primary",
+        icon=":material/arrow_forward:",
+        width="content",
     ):
         st.switch_page("app_pages/videos.py")
 
@@ -114,7 +112,7 @@ if view in ["Scene plans", "Edit script"]:
                 st.caption(
                     f"SCENE {index:02d}  /  {elapsed:02d}–{elapsed + scene['seconds']:02d} SECONDS"
                 )
-                st.subheader(scene["headline"])
+                st.markdown("**" + scene["headline"] + "**")
                 left, right = st.columns([1, 1])
                 left.markdown("**Voiceover and captions**  \n" + scene["narration"])
                 right.markdown("**Visual direction**  \n" + scene["visual_direction"])
@@ -227,13 +225,16 @@ elif view == "Timeline":
             st.error(str(error))
         else:
             st.rerun()
-    with st.form("structured_timeline_" + token):
+    with (
+        st.expander("Advanced: structured timeline JSON"),
+        st.form("structured_timeline_" + token),
+    ):
         timeline = st.text_area(
             "Structured video timeline JSON",
             value=json.dumps(
                 AdPlan.model_validate(ads[selected]).model_dump(), indent=2
             ),
-            height=500,
+            height=260,
         )
         submitted = st.form_submit_button(
             "Validate and save timeline", disabled=snapshot["busy"]
@@ -308,4 +309,6 @@ if snapshot["approved"]:
             mime="text/markdown",
             key="plan_md_" + token,
         )
-review_toolbar(api, cid, snapshot, "plan")
+usage_panel(snapshot)
+with st.expander("Campaign actions"):
+    review_toolbar(api, cid, snapshot, "plan")
