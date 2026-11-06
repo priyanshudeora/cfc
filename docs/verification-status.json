@@ -1,6 +1,6 @@
 {
   "verified_on": "2026-11-05",
-  "scope": "Repository audit and local test execution; adapter existence is not integration proof.",
+  "scope": "Actual local CPU/GPU ComfyUI inference, image-conditioning comparison, combined-source three-video export/revision, automated tests and browser inspection. Adapter existence alone is not integration proof.",
   "tasks": [
     {
       "task": "External editing-app MCP",
@@ -28,15 +28,21 @@
     },
     {
       "task": "Actual AI footage generation",
-      "status": "blocked",
-      "verification_evidence": "ComfyUI queue adapter exists, but no API workflow/model is configured. Local GPU reports 6141 MiB; the current adapter threshold is 10 GiB. Mocked tests are not proof of inference.",
-      "remaining_dependency": "A compatible local server, model weights, workflow and suitable hardware; then real submit/poll/download/FFmpeg assembly verification."
+      "status": "implemented",
+      "verification_evidence": "Actual LTX-Video 2B Q3_K_S GGUF inference on the RTX 4050 Laptop GPU (6141 MiB): 192x320, 9 frames in 49.89 s and 49 frames in 53.90 s, sampled peak whole-device use 2955 MiB. Four actual campaign generation jobs completed through submit/poll/download/full decode and FFmpeg export. Reports: tmp/comfy-verification and tmp/generated-demo-20261105/generation_demo_report.json.",
+      "remaining_dependency": "Experimental low-resolution footage is looped to scene duration. Visible product-shape drift requires human review. Higher resolution, native 20-second clips and a full 15-generated-scene campaign were not live-verified. Local benchmark profiles and checksum-verified weights must remain available."
     },
     {
       "task": "Product-image-conditioned generation",
-      "status": "pending",
-      "verification_evidence": "Current adapter replaces prompt/seed placeholders; it does not upload or bind product images into the model. Hybrid mode overlays product images in FFmpeg.",
-      "remaining_dependency": "A genuine image-conditioned workflow, image upload/loader binding, and a verified generation run."
+      "status": "implemented",
+      "verification_evidence": "Selected identity image uploaded to ComfyUI and bound through LoadImage -> LTXVImgToVideo -> SamplerCustom -> VAEDecode -> SaveWEBM. Two actual runs with equal prompt/seed/settings and different input images produced different first frames (mean RGB difference 80.31 at 64x64). Source manifests retain input and clip hashes. This establishes conditioning, not exact product fidelity.",
+      "remaining_dependency": "Human appearance review remains mandatory. The small model visibly changes the illustrated product. Reference-only assets cannot be conditioning images; hybrid static overlays remain labelled compositing."
+    },
+    {
+      "task": "Explicit CPU-only and CUDA profiles",
+      "status": "implemented",
+      "verification_evidence": "Separate --cpu run placed encoder, diffusion model and VAE on CPU: 192x320, 9 frames, 20 steps, 1198.18 s, sampled GPU use 0 MiB, peak RSS 3.98 GiB. CUDA with weight offloading was measured separately. Device, execution flags, software, hashes and RAM/VRAM readiness are checked; concurrency is one.",
+      "remaining_dependency": "CPU batch is disabled in its supplied profile because a 0.375-second clip took approximately 20 minutes. Memory pressure was observed. Fresh CPU-wheel-only and minimal-gallery installations were not separately tested."
     },
     {
       "task": "Speech-input transcription",
@@ -47,36 +53,51 @@
     {
       "task": "Complete local three-video demo and targeted revision",
       "status": "implemented",
-      "verification_evidence": "Real Kokoro, original music, burned captions and supplied product images passed both complete checkpoint/export rounds. Revising video 3 retained identical MP4 hashes/cache hits for videos 1 and 2; speech was reused. Approvals were explicitly simulated in an isolated test campaign.",
+      "verification_evidence": "Combined mode used one actual generated scene and four supplied-image scenes per video, real cached Kokoro voice, original music and captions. Both checkpoint/export rounds completed; revising only video 3's generation seed retained identical MP4 hashes and cache hits for videos 1 and 2. All final videos fully decoded at 1080x1920 / 20 s with non-silent audio. Actual mixed-audio local transcription matched the sample script. Approvals were explicitly simulated in an isolated technical-test campaign, not human advertising approval.",
       "remaining_dependency": "Human review/approval before real advertising use; this was a technical workflow verification, not campaign-performance validation."
     }
   ],
   "test_summary": {
     "python": "3.14.7",
-    "passed": 72,
+    "passed": 98,
     "live_api_credits_consumed": 0,
-    "notes": "13 third-party LangSmith deprecation warnings; FFmpeg and local Kokoro tests passed."
+    "notes": "98 passed in 120.40 seconds, including 15 focused generation protocol/policy tests; 13 existing third-party LangSmith deprecation warnings. Live CPU/GPU inference and export evidence is separate from controlled-response tests. Eight actual browser screens passed overflow/JavaScript checks at desktop and mobile widths."
   },
   "changed_files": [
     ".env.example",
     "README.md",
     "app_pages/architecture.py",
     "app_pages/brief.py",
+    "app_pages/connections.py",
+    "app_pages/plan.py",
+    "app_pages/videos.py",
+    "docs/frontend-verification.md",
+    "docs/local-generation.md",
     "docs/verification-status.json",
-    "scripts/setup_whisper.py",
-    "scripts/verify_local_demo.py",
+    "scripts/prepare_ui_preview.py",
+    "scripts/register_comfy_profile.py",
+    "scripts/setup_comfy.py",
+    "scripts/verify_comfy_workflow.py",
+    "scripts/verify_generation_demo.py",
     "tests/test_app.py",
-    "tests/test_copy_and_response_recovery.py",
-    "tests/test_inputs_and_recovery.py",
-    "tests/test_rendering_and_connections.py",
+    "tests/test_generation.py",
     "video_agent/campaigns.py",
-    "video_agent/config.py",
-    "video_agent/connections.py",
-    "video_agent/facts.py",
-    "video_agent/inputs.py",
+    "video_agent/control.py",
+    "video_agent/generation.py",
+    "video_agent/generation_contract.py",
+    "video_agent/jobs.py",
+    "video_agent/models.py",
     "video_agent/planning.py",
-    "video_agent/rendering/voice.py",
+    "video_agent/prompts.py",
+    "video_agent/rendering/editor.py",
+    "video_agent/rendering/pipeline.py",
+    "video_agent/rendering/renderer.py",
     "video_agent/service.py",
-    "video_agent/ui.py"
+    "video_agent/storage.py",
+    "video_agent/timeline.py",
+    "video_agent/ui.py",
+    "video_agent/validation.py",
+    "video_agent/workflow.py",
+    "workflows/ltx-2b-gguf-i2v.json"
   ]
 }

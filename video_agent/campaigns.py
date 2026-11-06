@@ -25,8 +25,13 @@ def build_brief(
     product_url="",
     accent_color="#00AABD",
     use_footage=False,
+    creation_mode="edit",
     **voice,
 ):
+    from .generation_contract import CREATION_CHOICES
+
+    if creation_mode not in CREATION_CHOICES:
+        raise ValueError("Choose editing, generated or combined creation.")
     product, audience, goal = product.strip(), audience.strip(), goal.strip()
     if not product or not audience or not goal:
         raise ValueError("Add a product name, audience and campaign goal.")
@@ -85,6 +90,7 @@ def build_brief(
         product_url=product_url,
         accent_color=accent_color,
         use_footage=bool(use_footage),
+        creation_mode=creation_mode,
         **voice,
     )
 
@@ -291,4 +297,6 @@ def template_plan(brief):
         }
         if ad["video_type"] == "product_reveal":
             ad["scenes"][0]["edit"] = {"mask": "wipe_left"}
-    return CampaignPlan.model_validate(result).model_dump()
+    from .generation_contract import apply_creation
+
+    return CampaignPlan.model_validate(apply_creation(result, brief)).model_dump()

@@ -105,6 +105,14 @@ else:
                 "Check the product, readable captions, pronunciation, music balance and ending call to action."
             )
             if snapshot["stage"] == "approve_sample":
+                cpu_batch_blocked = (
+                    state["brief"].get("generation", {}).get("batch_enabled") is False
+                    and snapshot["estimate"].get("generation_jobs", 0) > 1
+                )
+                if cpu_batch_blocked:
+                    st.warning(
+                        "Batch inference is disabled for this profile. A measured batch profile and fresh plan approval are required before creating the remaining videos."
+                    )
                 st.caption(
                     "Approving this sample authorizes the remaining two videos within the saved plan."
                 )
@@ -120,7 +128,9 @@ else:
                     disabled=snapshot["busy"]
                     or not snapshot["approved"]
                     or not reviewed
-                    or not available,
+                    or not available
+                    or cpu_batch_blocked,
+                    # Scope enforcement is repeated in CampaignService.act.
                     width="stretch",
                     icon=":material/task_alt:",
                 ):
@@ -216,6 +226,12 @@ else:
                         "A separate voice track is not available for this preview."
                     )
             with st.expander("Export checks & contact sheet"):
+                for i, source in enumerate(
+                    result.get("visual_source", {}).get("scenes", []), 1
+                ):
+                    st.caption(
+                        f"Scene {i}: {source.get('source', 'source not recorded')}"
+                    )
                 st.caption(result.get("quality_check", "Saved preview"))
                 if result.get("quality"):
                     st.json(result["quality"])

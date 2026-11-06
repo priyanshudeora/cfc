@@ -3,7 +3,7 @@
 import json, shutil, subprocess, sys
 import imageio_ffmpeg
 from ..config import *
-from ..storage import save_json
+from ..storage import save_json, read_json
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -159,10 +159,11 @@ class RenderMixin:
             voice_id=self.voice_id,
             music=str(folder / "music-original.wav"),
             visual_source={
-                "provider": "Supplied product PNGs and uploaded footage"
-                if ad["video_type"] in ["student_commute", "lifestyle_story"]
-                else "Supplied exact product images"
+                "scenes": read_json(folder / "edit_manifest.json").get(
+                    "scene_sources", []
+                )
             },
+            source_manifest=str(folder / "edit_manifest.json"),
             quality_check="20s, 1080x1920, H.264/AAC, full decode and audio levels verified",
             quality=quality,
             folder=str(folder),

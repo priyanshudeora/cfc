@@ -1,0 +1,165 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "ltx-video-2b-v0.9-Q3_K_S.gguf"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoaderGGUF",
+    "inputs": {
+      "clip_name": "t5-v1_1-xxl-encoder-Q3_K_S.gguf",
+      "type": "ltxv"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "__PROMPT__"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "low quality, distorted product, text, people"
+    }
+  },
+  "5": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "frame_rate": "__FPS__"
+    }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "__IMAGE__"
+    }
+  },
+  "7": {
+    "class_type": "LTXVImgToVideo",
+    "inputs": {
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "5",
+        1
+      ],
+      "vae": [
+        "13",
+        0
+      ],
+      "image": [
+        "6",
+        0
+      ],
+      "width": "__WIDTH__",
+      "height": "__HEIGHT__",
+      "length": "__FRAMES__",
+      "batch_size": 1,
+      "strength": 1.0
+    }
+  },
+  "8": {
+    "class_type": "LTXVScheduler",
+    "inputs": {
+      "steps": "__STEPS__",
+      "max_shift": 2.05,
+      "base_shift": 0.95,
+      "stretch": true,
+      "terminal": 0.1,
+      "latent": [
+        "7",
+        2
+      ]
+    }
+  },
+  "9": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "10": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "add_noise": true,
+      "noise_seed": "__SEED__",
+      "cfg": 3.0,
+      "positive": [
+        "7",
+        0
+      ],
+      "negative": [
+        "7",
+        1
+      ],
+      "sampler": [
+        "9",
+        0
+      ],
+      "sigmas": [
+        "8",
+        0
+      ],
+      "latent_image": [
+        "7",
+        2
+      ]
+    }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "10",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ]
+    }
+  },
+  "12": {
+    "class_type": "SaveWEBM",
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "filename_prefix": "cfc_gguf_smoke",
+      "codec": "vp9",
+      "fps": "__FPS__",
+      "crf": 20.0
+    }
+  },
+  "13": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "LTX-Video-VAE-BF16.safetensors"
+    }
+  }
+}

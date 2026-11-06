@@ -56,11 +56,16 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
         return load_kokoro(str(self.model_dir))
 
     def generated_source(self, scene, key):
-        if not self.generation_adapter:
+        from ..generation_contract import generation_key
+
+        record = getattr(self, "generated_records", {}).get(
+            generation_key(scene, self.brief)
+        )
+        if not record:
             raise ValueError(
-                "New footage generation is unavailable. Configure and verify local ComfyUI, or select reused image-based motion graphics."
+                "The approved generated footage has not finished preparation. No editing-only substitution is made."
             )
-        return self.generation_adapter.generate(scene, key, self.media_cache)
+        return record["path"]
 
     def render(self, state, ad, repository):
         repository.require_approval(state)
@@ -111,27 +116,41 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
                 self.settings.provider_workers,
                 brief.get("usage_rates"),
             )
-            if self.keys.get("COMFY_WORKFLOW"):
+            self.generated_records = {}
+            generated = [
+                s
+                for s in parsed.model_dump()["scenes"]
+                if s["edit"]["mode"] != "reused"
+            ]
+            if generated:
                 from ..generation import ComfyFootage
+                from ..generation_contract import generation_key
 
                 self.generation_adapter = ComfyFootage(
                     self.keys,
                     repository.control,
                     state["campaign_id"],
                     self.settings.gpu_workers,
+                    assets=self.assets,
+                    brief=brief,
+                    note=self.note,
                 )
-                if any(
-                    scene["edit"]["mode"] != "reused"
-                    for scene in parsed.model_dump()["scenes"]
-                ):
-                    from ..cache import file_hash
-
-                    if brief.get("generation", {}).get("workflow_sha256") != file_hash(
-                        self.keys["COMFY_WORKFLOW"]
-                    ):
-                        raise ValueError(
-                            "The local generation workflow changed. Save and approve its new scope before submitting footage jobs."
-                        )
+                if brief.get("generation") != self.generation_adapter.scope():
+                    raise ValueError(
+                        "Generation profile, workflow or device changed. Save and approve a fresh plan and estimate."
+                    )
+                # Preparation happens before FFmpeg/speech cache tasks. A slow or
+                # interrupted provider poll does not exhaust parent render retries.
+                for i, scene in enumerate(generated, 1):
+                    source_key = generation_key(scene, brief)
+                    self.note(f"Preparing AI footage {i}/{len(generated)}")
+                    self.generation_adapter.generate(
+                        scene, source_key, self.media_cache
+                    )
+                    self.generated_records[source_key] = dict(
+                        self.generation_adapter.last_result
+                    )
+                    self.note(f"Footage ready: {i}/{len(generated)}")
             canonical = parsed.model_dump()
             self.identity_images()
             self.notebook_kokoro()  # Resolve the actual model before forming its media dependency key.

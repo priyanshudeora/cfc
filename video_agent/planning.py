@@ -428,6 +428,19 @@ class Planner:
                 json.dumps(request, ensure_ascii=False), schema, system
             )
             candidate = fit_narration_timing(candidate, brief)
+            from .generation_contract import apply_creation
+
+            compiled = apply_creation(
+                candidate.model_dump()
+                if isinstance(candidate, CampaignPlan)
+                else {"ads": [candidate.model_dump()]},
+                brief,
+            )
+            candidate = (
+                CampaignPlan.model_validate(compiled)
+                if isinstance(candidate, CampaignPlan)
+                else AdPlan.model_validate(compiled["ads"][0])
+            )
             review = self.review_draft(candidate, brief, payload)
             if any("Fact review required" in issue for issue in review.issues):
                 if isinstance(candidate, CampaignPlan):

@@ -1,5 +1,7 @@
 # Frontend update verification
 
+This records the earlier frontend-only phase. The later genuine-generation implementation, real inference measurements and additional browser checks are documented in [local-generation.md](local-generation.md); its changes extend the backend as well as the interface. The 83-test count below is the historical frontend-phase result.
+
 Verified on 5 November 2026 with Python 3.14.7 and Streamlit 1.66.1. Changes are limited to presentation, navigation, UI action bindings and QA helpers. Campaign storage, LangGraph execution, provider adapters, usage policy, caches, media rendering and export implementation were preserved.
 
 The shared design lives in `.streamlit/config.toml`: a neutral light background, restrained teal accent, smaller headings, readable 15 px base text and reduced page padding. No custom CSS or generated-class selectors were introduced. Native controls retain labels, keyboard interaction and responsive stacking.

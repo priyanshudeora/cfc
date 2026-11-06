@@ -78,9 +78,11 @@ def workflow_indicator(snapshot):
 
 
 @st.cache_resource(max_entries=1)
-def get_service(data_dir=None):
+def get_service(data_dir=None, backend_revision="ai-footage-1"):
     from .service import CampaignService
 
+    if backend_revision != "ai-footage-1":
+        raise ValueError("Reload the application backend after an interface update.")
     settings = Settings(data_dir=Path(data_dir)) if data_dir else Settings()
     try:
         secrets = dict(st.secrets)
@@ -152,6 +154,31 @@ def activity(cid):
         st.rerun()
     if job["status"] == "running":
         st.progress(job["progress"], text=job["title"])
+        if cid != "api-diagnostics":
+            footage_tasks = [
+                t
+                for t in api.repository.control.tasks(cid)
+                if t["kind"] == "generation"
+            ]
+            if footage_tasks:
+                counts = {
+                    status: sum(t["status"] == status for t in footage_tasks)
+                    for status in [
+                        "queued",
+                        "generating",
+                        "waiting",
+                        "downloading",
+                        "complete",
+                        "failed",
+                        "unknown",
+                    ]
+                }
+                st.caption(
+                    "AI footage · "
+                    + " · ".join(
+                        f"{count} {status}" for status, count in counts.items() if count
+                    )
+                )
         if cid != "api-diagnostics" and st.button(
             "Stop queued and future work",
             key="stop_job_" + job["id"],

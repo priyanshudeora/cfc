@@ -102,10 +102,10 @@ class ControlStore:
             self.release(cid, owner)
 
     @contextmanager
-    def resource(self, name, limit, cid):
+    def resource(self, name, limit, cid, wait_seconds=120):
         owner = uuid.uuid4().hex
         acquired = None
-        for _ in range(600):
+        for _ in range(max(1, int(wait_seconds / 0.2))):
             self.check_cancelled(cid)
             for slot in range(max(1, min(8, int(limit)))):
                 key = f"resource:{name}:{slot}"

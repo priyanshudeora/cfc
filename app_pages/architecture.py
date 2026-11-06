@@ -18,7 +18,7 @@ labels = {
     "approve_plan": "Approve plan",
     "save_approved_plan": "Save approved scripts",
     "ready_sample": "Generate sample?",
-    "sample": "Local / API voice + render",
+    "sample": "Footage / voice / FFmpeg",
     "approve_sample": "Approve sample",
     "revise_sample": "Revise sample script",
     "prepare_assets": "Check planned footage",
@@ -68,10 +68,13 @@ with st.container(border=True):
     st.caption(
         "Text and reference-image analysis are local. Video analysis extracts frames and optional transcripts. Models and supplied inputs are data, never approval authority."
     )
+    st.markdown(
+        "**Creation is independent of planning:** editing uses supplied assets; generated and combined modes prepare image-conditioned clips in a separate ComfyUI process before voice and FFmpeg assembly. Device profiles pin measured settings and keep one inference job active. Running job IDs, output caches and reservations survive frontend reruns."
+    )
 with st.container(border=True):
     st.subheader("Optional integrations and future work")
     st.markdown(
-        "**Optional:** Gemini planning with account-access checks, ElevenLabs speech with a character allowance, local whisper.cpp transcription, and a local ComfyUI footage queue with workflow/model/GPU checks. They are not required for image-based motion graphics."
+        "**Optional:** Gemini planning, ElevenLabs speech, local whisper.cpp transcription and local ComfyUI image-to-video. ComfyUI uses measured CPU/GPU profiles, real image upload and latent conditioning. CPU experimentation is slow and batch is disabled in its supplied local profile. Editing remains available independently."
     )
     st.markdown(
         "**Future:** external editing-application MCP and Jev integration. Neither is connected or represented by the local Python functions. Semantic product-appearance and advertising-performance review are not automated; human media review remains required."
@@ -92,7 +95,7 @@ st.dataframe(
     audit["tasks"],
     hide_index=True,
     width="stretch",
-    alt="Implementation status, verification evidence and remaining dependencies for eight audited capabilities",
+    alt="Implementation status, verification evidence and remaining dependencies for audited capabilities",
 )
 with st.container(border=True):
     st.subheader("Application modules")

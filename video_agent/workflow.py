@@ -333,6 +333,13 @@ class CampaignRuntime:
                         result[key],
                         f"{index:02d}_{state['plan']['ads'][index - 1]['video_type']}{suffix}",
                     )
+                if (
+                    result.get("source_manifest")
+                    and Path(result["source_manifest"]).is_file()
+                ):
+                    archive.write(
+                        result["source_manifest"], f"{index:02d}_scene_sources.json"
+                    )
         self.note("Final approval saved. Delivery bundle ready.")
         return dict(status="complete", export_path=str(folder / "campaign.zip"))
 

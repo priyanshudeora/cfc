@@ -65,6 +65,11 @@ class JobManager:
             if match:
                 job.progress = min(0.98, int(match.group(1)) / 20)
             scene = re.search(r"Scene (\d+)/5", str(message))
+            footage = re.search(r"Footage ready: (\d+)/(\d+)", str(message))
+            if footage:
+                job.progress = max(
+                    job.progress, 0.25 * int(footage[1]) / int(footage[2])
+                )
             if scene:
                 job.progress = max(
                     job.progress, min(0.9, 0.3 + int(scene.group(1)) * 0.1)

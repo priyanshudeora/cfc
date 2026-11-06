@@ -6,7 +6,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 import imageio_ffmpeg
 from PIL import Image, ImageDraw
-from ..timeline import SceneEdit, AudioEdit
+from ..timeline import SceneEdit, AudioEdit, media_edit, generation_dependency
 from ..storage import digest, save_json
 from ..cache import file_hash
 
@@ -56,13 +56,13 @@ class FFmpegEditor:
                 self.size,
                 self.fps,
                 {k: scene[k] for k in ["headline", "footnote", "seconds", "asset_ids"]},
-                scene.get("edit", {}),
+                media_edit(scene.get("edit", {})),
                 hashes,
                 {
                     k: brief.get(k)
                     for k in ["brand", "product", "variant", "accent_color"]
                 },
-                brief.get("generation")
+                generation_dependency(brief)
                 if scene.get("edit", {}).get("mode", "reused") != "reused"
                 else None,
             ]
@@ -235,7 +235,38 @@ class FFmpegEditor:
         self.renderer.note(
             f"Scene {index + 1}/5: {'reused verified clip' if hit else 'edited with FFmpeg'}"
         )
-        return result
+        edit = SceneEdit.model_validate(scene.get("edit", {}))
+        if edit.mode != "reused":
+            from ..generation_contract import generation_key
+
+            source = dict(self.renderer.generated_records[generation_key(scene, brief)])
+            source["source"] = (
+                "compositing" if edit.mode == "hybrid" else "generated footage"
+            )
+            source.update(
+                requested_seconds=scene["seconds"],
+                duration_fill="loop",
+                model_clip_seconds=edit.generation_settings.frames
+                / edit.generation_settings.fps,
+            )
+            if edit.mode == "hybrid":
+                source["overlay_asset"] = scene["asset_ids"][0]
+        else:
+            asset = scene["asset_ids"][0]
+            path = self.renderer.commute_files.get(asset) or self.renderer.assets.get(
+                asset, {}
+            ).get("path")
+            if not path or not Path(path).is_file():
+                raise ValueError("Missing planned visual asset: " + asset)
+            source = dict(
+                source="image animation"
+                if Path(path).suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]
+                else "uploaded footage",
+                asset=asset,
+                sha256=file_hash(path),
+                requested_seconds=scene["seconds"],
+            )
+        return dict(result, source=source)
 
     def encode(self, ad, brief, folder):
         scenes = ad["scenes"]
@@ -245,6 +276,7 @@ class FFmpegEditor:
                 for i, scene in enumerate(scenes)
             ]
             clips = [future.result() for future in futures]
+        self.scene_sources = [clip["source"] for clip in clips]
         inputs = [value for clip in clips for value in ["-i", clip["path"]]]
         graph = [
             f"[{i}:v]settb=AVTB,fps={self.fps},format=yuv420p[v{i}]"
@@ -404,6 +436,7 @@ class FFmpegEditor:
             folder / "edit_manifest.json",
             dict(
                 editor="FFmpeg",
+                scene_sources=getattr(self, "scene_sources", []),
                 timeline=ad,
                 size=self.size,
                 fps=self.fps,

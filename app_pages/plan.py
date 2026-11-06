@@ -1,4 +1,5 @@
 import copy
+import json
 import streamlit as st
 from video_agent.ui import (
     service,
@@ -48,6 +49,61 @@ if snapshot.get("missing_assets"):
 with st.expander("Campaign direction"):
     st.markdown(state["plan"]["summary"])
 
+generation = state["brief"].get("generation", {})
+if generation:
+    sample_jobs = sum(
+        s["edit"]["mode"] != "reused" for s in state["plan"]["ads"][0]["scenes"]
+    )
+    remaining_jobs = sum(
+        s["edit"]["mode"] != "reused"
+        for a in state["plan"]["ads"][1:]
+        for s in a["scenes"]
+    )
+    st.info(
+        f"Local AI footage estimate: up to {sample_jobs} sample jobs, then {remaining_jobs} remaining jobs after sample approval. Completed matching clips are reused. One inference job runs at a time; electricity and run time are not priced."
+    )
+    st.caption(
+        "Execution: "
+        + generation["execution_device"]
+        + ". Product appearance requires human review; format checks do not establish fidelity."
+    )
+    st.caption(
+        snapshot["estimate"].get("currency_estimate", "Local compute is not priced.")
+    )
+    server_jobs = api.settings.campaign_defaults(api.secrets)["limits"].get(
+        "generation_jobs", 0
+    )
+    saved_jobs = state["brief"].get("limits", {}).get("generation_jobs", 0)
+    spent_jobs = sum(
+        json.loads(
+            row["actual"] if row["status"] == "settled" else row["reserved"]
+        ).get("generation_jobs", 0)
+        for row in snapshot.get("usage", [])
+    )
+    if (
+        server_jobs > saved_jobs
+        and spent_jobs + snapshot["estimate"].get("generation_jobs", 0) > saved_jobs
+        and snapshot["stage"] in ["approve_plan", "ready_sample", "approve_sample"]
+    ):
+        st.caption(
+            f"This campaign retains its saved allowance of {saved_jobs} generation jobs. The server offers {server_jobs}; adopting it creates a new estimate and invalidates previous approvals."
+        )
+        if st.button(
+            "Review updated generation allowance",
+            disabled=snapshot["busy"],
+            key="generation_allowance_" + token,
+        ):
+            try:
+                api.review_server_generation_allowance(cid, token)
+            except (ValueError, RuntimeError) as error:
+                st.error(str(error))
+            else:
+                st.rerun()
+    if not generation.get("batch_enabled"):
+        st.warning(
+            "Experimental profile: one generated scene per stage. Batch generation is disabled; the remaining videos need a separately approved measured batch profile."
+        )
+
 for col, ad in zip(st.columns(3), state["plan"]["ads"]):
     with col.container(border=True, height="stretch"):
         st.caption(FORMAT_NAMES[ad["video_type"]].upper())
@@ -55,13 +111,18 @@ for col, ad in zip(st.columns(3), state["plan"]["ads"]):
         st.markdown(ad["concept"])
         st.caption("Opening · " + ad["scenes"][0]["headline"])
 
+cpu_batch_blocked = (
+    bool(generation)
+    and not generation.get("batch_enabled")
+    and snapshot["estimate"].get("generation_jobs", 0) > 1
+)
 if snapshot["stage"] == "approve_plan":
     if st.button(
         "Approve plan and save",
         type="primary",
         icon=":material/task_alt:",
         width="content",
-        disabled=snapshot["busy"],
+        disabled=snapshot["busy"] or cpu_batch_blocked,
         key="approve_plan_" + token,
     ):
         action(api, cid, "approve", snapshot)
@@ -72,6 +133,7 @@ elif snapshot["stage"] == "ready_sample":
         icon=":material/movie:",
         width="content",
         disabled=snapshot["busy"]
+        or cpu_batch_blocked
         or not snapshot["approved"]
         or bool(snapshot.get("missing_assets")),
         key="generate_" + token,
@@ -116,6 +178,21 @@ if view in ["Scene plans", "Edit script"]:
                 left, right = st.columns([1, 1])
                 left.markdown("**Voiceover and captions**  \n" + scene["narration"])
                 right.markdown("**Visual direction**  \n" + scene["visual_direction"])
+                edit = scene.get("edit", {})
+                st.caption(
+                    "Creation: "
+                    + edit.get("mode", "reused")
+                    + " · Source assets: "
+                    + ", ".join(scene["asset_ids"])
+                )
+                if edit.get("generation_settings"):
+                    spec = edit["generation_settings"]
+                    st.caption(
+                        f"Purpose: {scene.get('purpose', '')} · Conditioning: {edit['conditioning_asset']} · {spec['width']} × {spec['height']}, {spec['frames']} frames at {spec['fps']} fps; loop to {scene['seconds']} seconds."
+                    )
+                    with st.expander(f"Scene {index} generation prompt & settings"):
+                        st.write(edit["generation_prompt"])
+                        st.json(spec)
                 if scene["footnote"]:
                     st.caption(scene["footnote"])
             elapsed += scene["seconds"]
@@ -201,7 +278,6 @@ if view in ["Scene plans", "Edit script"]:
             else:
                 st.rerun()
 elif view == "Timeline":
-    import json
     from video_agent.models import AdPlan
 
     selected = st.selectbox(

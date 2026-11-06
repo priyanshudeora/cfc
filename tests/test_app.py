@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv("CFC_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CFC_DEFAULT_LIMITS_JSON", "{}")
+    monkeypatch.setenv("CFC_DEFAULT_USAGE_RATES_JSON", "{}")
+    monkeypatch.setenv("CFC_PLANNING_MODEL", "gemini-2.5-flash")
     monkeypatch.setattr(
         "requests.sessions.Session.request",
         lambda *a, **k: (_ for _ in ()).throw(
@@ -142,23 +145,42 @@ def test_creation_preserves_provider_selection_without_calling_it(app, monkeypat
     calls = []
 
     def capture(*args, **kwargs):
-        calls.append(args)
+        calls.append((args, kwargs))
         raise ValueError("Captured configuration; no provider dispatched")
 
     monkeypatch.setattr(api, "create", capture)
     at.button(key="new_campaign_button").click().run()
     at.segmented_control(key="starting_point").set_value("AI concepts")
     at.segmented_control(key="voice_provider").set_value("ElevenLabs")
+    at.selectbox(key="creation_mode").select("combine")
     at.text_input(key="elevenlabs_voice").set_value("example-voice")
     next(w for w in at.form_submit_button if w.label == "Create campaign").click().run()
-    assert not at.exception and calls[0][3:6] == ("ai", "elevenlabs", "example-voice")
+    assert not at.exception and calls[0][0][3:6] == (
+        "ai",
+        "elevenlabs",
+        "example-voice",
+    )
+    assert calls[0][1]["creation_mode"] == "combine"
 
 
-def test_editing_preserves_hidden_backend_settings(app):
+def test_editing_preserves_hidden_backend_settings(app, monkeypatch):
     from test_workflow import make_campaign
     from video_agent.control import DEFAULT_LIMITS
 
     at, api = app
+    from video_agent.timeline import FootageSettings
+
+    spec = FootageSettings(frames=9).model_dump()
+    monkeypatch.setattr(
+        api,
+        "generation_scope",
+        lambda: dict(
+            settings=spec,
+            tested_settings=[spec],
+            execution_device="cuda",
+            batch_enabled=True,
+        ),
+    )
     cid = make_campaign(
         api,
         limits=dict(DEFAULT_LIMITS, model_tokens=77777),
@@ -174,12 +196,14 @@ def test_editing_preserves_hidden_backend_settings(app):
         w.key == "planning_model" for w in at.text_input
     )
     at.text_input(key="campaign_audience").set_value("Updated audience")
+    at.selectbox(key="creation_mode").select("combine")
     next(
         w for w in at.form_submit_button if w.label == "Save brief and reset plan"
     ).click().run()
     assert not at.exception
     after = api.snapshot(cid)["state"]["brief"]
     assert after["audience"] == "Updated audience"
+    assert after["creation_mode"] == "combine"
     for key in ["limits", "usage_rates", "planning_model"]:
         assert after[key] == before[key]
 

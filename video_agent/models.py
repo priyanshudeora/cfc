@@ -6,6 +6,7 @@ from .timeline import SceneEdit, AudioEdit
 
 
 class Scene(BaseModel):
+    purpose: str = Field(default="", max_length=300)
     headline: str = Field(min_length=1, max_length=90)
     caption: str = Field(min_length=1, max_length=240)
     narration: str = Field(min_length=1, max_length=240)

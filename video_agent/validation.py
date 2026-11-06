@@ -4,6 +4,7 @@ import re
 from .models import *
 from .prompts import BANNED_COPY
 from .facts import normalized, copy_issues
+from .generation_contract import creation_issues
 
 
 def word_count(text):
@@ -158,6 +159,7 @@ def plan_copy_issues(plan, brief):
         + claim_copy_issues(plan, brief)
         + (copy_issues(plan, brief) if brief.get("schema_version", 1) >= 2 else [])
         + (numeric_claim_issues(plan) if brief.get("schema_version", 1) < 2 else [])
+        + creation_issues(plan, brief)
     )
 
 

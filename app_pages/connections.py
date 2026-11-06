@@ -62,7 +62,7 @@ with st.expander("Optional local transcription and footage generation"):
     transcription_binary, transcription_model = transcription_config(keys)
 
     st.caption(
-        "Motion graphics use your uploaded assets. New footage is a separate optional local ComfyUI stage; it requires installed model weights, a compatible exported API workflow and suitable GPU memory."
+        "Editing uses uploaded assets. AI footage uses the independent creation choice and a measured local ComfyUI profile. Configure COMFY_DEVICE=cpu or cuda on the server; CPU offloading during CUDA execution is not CPU-only inference. Model installation and benchmark evidence are required separately."
     )
     st.caption(
         "whisper.cpp: "

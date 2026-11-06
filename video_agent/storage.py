@@ -151,7 +151,10 @@ def artifact_identity(result):
     if not result:
         return {}
     files = {}
-    for role in ["video", "captions", "voice"]:
+    roles = ["video", "captions", "voice"] + (
+        ["source_manifest"] if result.get("source_manifest") else []
+    )
+    for role in roles:
         path = Path(result.get(role, ""))
         files[role] = (
             hashlib.sha256(path.read_bytes()).hexdigest()
@@ -161,7 +164,7 @@ def artifact_identity(result):
     return dict(
         files=files,
         version=result.get("version"),
-        paths={role: result.get(role, "") for role in ["video", "captions", "voice"]},
+        paths={role: result.get(role, "") for role in roles},
         content_key=result.get("content_key"),
         quality=result.get("quality"),
     )

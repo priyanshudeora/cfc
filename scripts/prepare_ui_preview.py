@@ -66,9 +66,18 @@ try:
         campaigns[stage] = cid
         plan = api.snapshot(cid)["state"]["plan"]
         for i, output in enumerate(r["initial_outputs"]):
-            manifest = json.loads((Path(output["folder"]) / "edit_manifest.json").read_text())
-            if manifest["timeline"] != plan["ads"][i]:
-                raise RuntimeError("Source media does not match a local template for this brief. Use an unmodified verify_local_demo.py run.")
+            manifest = json.loads(
+                (Path(output["folder"]) / "edit_manifest.json").read_text()
+            )
+            from video_agent.models import AdPlan
+
+            if (
+                AdPlan.model_validate(manifest["timeline"]).model_dump()
+                != plan["ads"][i]
+            ):
+                raise RuntimeError(
+                    "Source media does not match a local template for this brief. Use an unmodified verify_local_demo.py run."
+                )
         if stage == "plan":
             continue
         snap = api.snapshot(cid)

@@ -1,5 +1,6 @@
 import streamlit as st
 from video_agent.ui import service, footage_upload, input_panel
+from video_agent.generation_contract import CREATION_CHOICES
 
 api = service()
 cid = st.session_state.get("active_campaign")
@@ -22,6 +23,9 @@ if not new and not editing:
             st.markdown("**Audience**  \n" + brief.get("audience", ""))
             st.markdown("**Goal**  \n" + brief.get("goal", ""))
             st.markdown("**Ending call to action**  \n" + brief.get("cta", ""))
+            st.caption(
+                "Creation: " + CREATION_CHOICES[brief.get("creation_mode", "edit")]
+            )
             st.caption(
                 "Three 20-second vertical videos · English narration and captions"
             )
@@ -158,6 +162,20 @@ else:
                 st.caption(
                     "Saved images stay with this campaign. Replace them from the saved brief view."
                 )
+        with assets:
+            creation_mode = st.selectbox(
+                "Creation",
+                list(CREATION_CHOICES),
+                index=list(CREATION_CHOICES).index(values.get("creation_mode", "edit")),
+                format_func=lambda key: CREATION_CHOICES[key],
+                key="creation_mode",
+            )
+            st.caption(
+                "Planning writes the scripts. Creation chooses the media source. New AI footage uses a separately configured local ComfyUI model and your product image as conditioning."
+            )
+            st.caption(
+                "AI footage is experimental and can change product details. Review its sample. Short generated clips are looped to the approved scene duration; no automatic editing-only fallback."
+            )
         if not editing:
             with assets:
                 starting = st.segmented_control(
@@ -268,6 +286,7 @@ else:
                 competitors=competitors,
                 accent_color=accent,
                 use_footage=use_footage,
+                creation_mode=creation_mode,
             )
             if editing:
                 api.update_brief(cid, changes, snapshot["signature"])

@@ -117,8 +117,22 @@ Generated/hybrid mode requires configured local ComfyUI and approved job allowan
 still-image animation is never labelled AI-generated footage. Unknown copy requires
 explicit human fact review. No automatic paid provider or model fallback.
 """
-WRITER_SYSTEM += EXECUTABLE_EDITS
-REVIEW_SYSTEM += EXECUTABLE_EDITS
+CREATION_SYSTEM = """
+Creation is independent of planning. Honor brief.creation_mode:
+edit: use only supplied-image motion graphics or uploaded clips; no generation.
+generate: every scene uses local image-conditioned footage before FFmpeg assembly.
+combine: include generated footage and supplied-asset editing/compositing in each video.
+For generate/combine, the 2D-only visual restriction above applies to reused scenes.
+Generated scenes need a purpose, generation_prompt, seed, conditioning_asset from
+this campaign's product identity images, and generation_settings selected only from
+brief.generation.tested_settings. Do not invent new workflow nodes or output sizes.
+Short generated clips are explicitly looped to scene.seconds. Do not describe that as
+native full-length generation. Hybrid means FFmpeg compositing, not proof of image conditioning.
+Reference images never become product conditioning or final footage. Generation can
+change the product's appearance: preserve human approval, never claim verified fidelity.
+"""
+WRITER_SYSTEM += EXECUTABLE_EDITS + CREATION_SYSTEM
+REVIEW_SYSTEM += EXECUTABLE_EDITS + CREATION_SYSTEM
 
 REVISION_SYSTEM = (
     WRITER_SYSTEM

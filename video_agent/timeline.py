@@ -15,6 +15,25 @@ class TextLayout(BaseModel):
     size: int = Field(default=72, ge=36, le=100)
 
 
+class FootageSettings(BaseModel):
+    """Small LTX clips; a verified device profile further restricts these values."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    width: int = Field(default=192, ge=64, le=512)
+    height: int = Field(default=320, ge=64, le=512)
+    frames: int = Field(default=49, ge=9, le=49)
+    fps: int = Field(default=24, ge=1, le=30)
+    steps: int = Field(default=20, ge=1, le=30)
+    strength: float = Field(default=1, gt=0, le=1)
+    duration_fill: Literal["loop"] = "loop"
+
+    @model_validator(mode="after")
+    def supported_dimensions(self):
+        if self.width % 32 or self.height % 32 or (self.frames - 1) % 8:
+            raise ValueError("LTX needs dimensions divisible by 32 and 8n+1 frames.")
+        return self
+
+
 class SceneEdit(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     mode: Literal["reused", "generated", "hybrid"] = "reused"
@@ -35,6 +54,8 @@ class SceneEdit(BaseModel):
     text: TextLayout = Field(default_factory=TextLayout)
     generation_prompt: str = Field(default="", max_length=1500)
     seed: int = Field(default=1, ge=0, le=2147483647)
+    conditioning_asset: str = Field(default="", max_length=80)
+    generation_settings: FootageSettings | None = None
 
     @model_validator(mode="after")
     def boundaries(self):
@@ -67,14 +88,18 @@ def ad_key(ad, brief):
 
     value = AdPlan.model_validate(ad).model_dump()
     scenes = [
-        {k: v for k, v in scene.items() if k not in ["visual_direction", "claim_ids"]}
+        {
+            k: v
+            for k, v in scene.items()
+            if k not in ["visual_direction", "claim_ids", "purpose"]
+        }
         for scene in value["scenes"]
     ]
     used = {key for scene in scenes for key in scene["asset_ids"]}
     return digest(
         [
             RENDER_VERSION,
-            scenes,
+            [dict(s, edit=media_edit(s["edit"])) for s in scenes],
             value["audio"],
             {
                 k: brief.get(k)
@@ -91,11 +116,30 @@ def ad_key(ad, brief):
                 ]
             },
             {k: v for k, v in brief.get("asset_hashes", {}).items() if k in used},
-            brief.get("generation")
+            generation_dependency(brief)
             if any(scene["edit"]["mode"] != "reused" for scene in scenes)
             else None,
         ]
     )
+
+
+def media_edit(edit):
+    """Keep legacy editing cache identities when adding optional generation fields."""
+    return {
+        k: v
+        for k, v in edit.items()
+        if k not in ["conditioning_asset", "generation_settings"]
+        or edit.get("mode", "reused") != "reused"
+    }
+
+
+def generation_dependency(brief):
+    """Resource policy changes require approval, but do not change existing pixels."""
+    value = brief.get("generation", {})
+    return {
+        k: value.get(k)
+        for k in ["workflow_sha256", "model_fingerprint", "execution_device"]
+    }
 
 
 def revise_timeline(plan, index, feedback):

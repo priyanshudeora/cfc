@@ -200,6 +200,7 @@ class CampaignService:
         model=None,
         allow_incomplete=True,
         usage_rates=None,
+        creation_mode="edit",
     ):
         defaults = self.settings.campaign_defaults(self.secrets)
         model = model or defaults["model"]
@@ -250,6 +251,7 @@ class CampaignService:
             product_url=product_url,
             accent_color=accent_color,
             use_footage=use_footage,
+            creation_mode=creation_mode,
             voice_backend=voice_backend,
             voice_id=voice_id.strip(),
             refresh_research=bool(refresh_research),
@@ -261,6 +263,8 @@ class CampaignService:
             if voice_backend == "elevenlabs"
             else "kokoro-v1.0-int8",
         )
+        if creation_mode != "edit":
+            brief["generation"] = self.generation_scope()
         prepared = prepare_images(
             product_image, detail_image, style_images, allow_incomplete=allow_incomplete
         )
@@ -312,6 +316,46 @@ class CampaignService:
                 lambda: runtime.agent.invoke(seed, runtime.config),
             )
         return cid
+
+    def generation_scope(self):
+        from .generation import ComfyFootage
+
+        try:
+            return ComfyFootage(
+                self.settings.keys(self.secrets),
+                self.repository.control,
+                "configuration",
+            ).scope()
+        except (KeyError, TypeError, OSError) as error:
+            raise ValueError(
+                "The generation profile is incomplete or its evidence/model files are missing. Register a completed real benchmark first."
+            ) from error
+
+    def review_server_generation_allowance(self, cid, expected_signature):
+        """Only an explicit action adopts a higher finite server job allowance.
+
+        Keep rates, all other limits, the plan and planning model. Revoke previous
+        grants and return to plan review; this action never dispatches inference.
+        """
+        with self.lock:
+            current = self.snapshot(cid)
+            if current["busy"] or current["signature"] != expected_signature:
+                raise ValueError(
+                    "Refresh the current review before changing its allowance."
+                )
+            brief = dict(current["state"]["brief"])
+            server = limits_for(self.settings.campaign_defaults(self.secrets)["limits"])
+            limits = limits_for(brief.get("limits"))
+            if server["generation_jobs"] <= limits["generation_jobs"]:
+                raise ValueError("No higher server generation allowance is configured.")
+            brief["limits"] = dict(limits, generation_jobs=server["generation_jobs"])
+            self._replace_draft(
+                cid,
+                current["state"]["plan"],
+                brief,
+                current,
+                "Updated generation allowance; new estimate and plan approval required",
+            )
 
     def import_existing(self):
         """Read the existing checkpoint once; never modify the notebook's database."""
@@ -405,6 +449,7 @@ class CampaignService:
                         "product_url": "",
                         "accent_color": "#00AABD",
                         "use_footage": False,
+                        "creation_mode": "edit",
                     }.items()
                 },
                 **{
@@ -431,6 +476,8 @@ class CampaignService:
                 old["asset_hashes"],
                 old["asset_ids"],
             )
+            if brief.get("creation_mode", "edit") != "edit":
+                brief["generation"] = self.generation_scope()
             plan = template_plan(brief)
             runtime = self.runtime(cid)
             runtime.validate_plan(plan, brief)
@@ -549,6 +596,25 @@ class CampaignService:
                 raise ValueError("Unknown campaign action.")
             if action in ["generate", "approve"] and stage != "approve_plan":
                 self.repository.require_approval(state)
+            if action in ["generate", "approve"] and stage in [
+                "approve_plan",
+                "ready_sample",
+                "approve_sample",
+            ]:
+                scoped_ads = (
+                    state["plan"]["ads"][:1]
+                    if stage != "approve_sample"
+                    else state["plan"]["ads"][1:]
+                )
+                jobs = estimate(state["brief"], scoped_ads)["generation_jobs"]
+                if (
+                    jobs > 1
+                    and state["brief"].get("generation", {}).get("batch_enabled")
+                    is False
+                ):
+                    raise ValueError(
+                        "This experimentation profile permits one generated scene per stage. Batch is not enabled; use a measured batch profile and review a fresh plan."
+                    )
             answer = dict(
                 action=action,
                 signature=current["signature"],
@@ -943,22 +1009,7 @@ class CampaignService:
                 for ad in plan["ads"]
                 for scene in ad["scenes"]
             ):
-                from .generation import ComfyFootage
-                from .cache import file_hash
-
-                keys = self.settings.keys(self.secrets)
-                ready = ComfyFootage(keys, self.repository.control, cid).readiness()
-                if not ready["available"]:
-                    raise ValueError(
-                        ready["message"] + " Select reused image-based mode instead."
-                    )
-                brief = dict(
-                    brief,
-                    generation=dict(
-                        workflow_sha256=file_hash(keys["COMFY_WORKFLOW"]),
-                        minimum_vram_gb=float(keys.get("COMFY_MIN_VRAM_GB") or 10),
-                    ),
-                )
+                brief = dict(brief, generation=self.generation_scope())
             try:
                 self.runtime(cid).validate_plan(plan, brief)
             except ValueError as error:
