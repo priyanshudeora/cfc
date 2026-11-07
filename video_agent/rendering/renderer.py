@@ -1,12 +1,11 @@
 """Approval-checked local editing with independent scene and speech caches."""
 
 from pathlib import Path
-import shutil
 import threading
 from .audio import AudioMixin
 from .visuals import VisualMixin
 from .pipeline import RenderMixin
-from .voice import VOICE_LOCK, ElevenLabsVoice, load_kokoro
+from .voice import VOICE_LOCK, ElevenLabsVoice, local_voice
 from ..config import MODEL_FILES
 from ..models import CampaignPlan, AdPlan
 from ..validation import plan_copy_issues
@@ -39,21 +38,37 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
 
     def notebook_kokoro(self):
         if self.voice_backend == "elevenlabs":
+            import sys
+
+            self.tts_runtime = dict(
+                python=sys.version.split()[0],
+                separate_worker=False,
+                remote_inference=True,
+            )
             return ElevenLabsVoice(
                 self.keys,
                 self.brief.get("voice_model")
                 or self.keys.get("ELEVENLABS_MODEL")
                 or "eleven_multilingual_v2",
             )
-        for name, size in MODEL_FILES.items():
-            self.ensure_notebook_model(name, size)
+        from ..voice_setup import validate_voice_models
+
+        validate_voice_models(self.model_dir)
         from ..cache import file_hash
         from ..storage import digest
 
         self.voice_model_hash = digest(
             [file_hash(self.model_dir / name) for name in MODEL_FILES]
         )
-        return load_kokoro(str(self.model_dir))
+        engine = local_voice(self.model_dir, self.keys)
+        self.tts_runtime = dict(
+            python=engine.info["python"],
+            separate_worker=True,
+            kokoro_onnx=engine.info["kokoro_onnx"],
+            onnxruntime=engine.info["onnxruntime"],
+            cached_audio_may_be_reused=True,
+        )
+        return engine
 
     def generated_source(self, scene, key):
         from ..generation_contract import generation_key
@@ -69,10 +84,6 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
 
     def render(self, state, ad, repository):
         repository.require_approval(state)
-        if not shutil.which("ffprobe"):
-            raise RuntimeError(
-                "Install FFmpeg with FFprobe on PATH before generating video."
-            )
         if ad not in state["plan"]["ads"]:
             raise ValueError("This video is outside the approved plan.")
         index = state["plan"]["ads"].index(ad)
@@ -122,6 +133,37 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
                 for s in parsed.model_dump()["scenes"]
                 if s["edit"]["mode"] != "reused"
             ]
+            from ..preflight import (
+                editing_readiness,
+                validate_assets,
+                generation_preflight,
+            )
+
+            self.note("Preflight: editing tools and product assets")
+            editing = editing_readiness()
+            if not editing["available"]:
+                raise ValueError(editing["message"])
+            stage_ads = (
+                state["plan"]["ads"][:1] if index == 0 else state["plan"]["ads"][1:]
+            )
+            stage_scenes = [
+                scene for stage_ad in stage_ads for scene in stage_ad["scenes"]
+            ]
+            validate_assets(brief, self.assets, self.commute_files, stage_scenes)
+            self.identity_images()
+            self.note(
+                "Preflight: initialize selected voice before any footage submission"
+            )
+            engine = self.notebook_kokoro()
+            if self.voice_backend == "elevenlabs":
+                if not engine.key or not self.voice_id:
+                    raise ValueError(
+                        "ElevenLabs requires an API key and selected voice ID before footage generation."
+                    )
+            elif self.voice_id not in engine.info["voices"]:
+                raise ValueError(
+                    "Selected local voice ID is unavailable: " + self.voice_id
+                )
             if generated:
                 from ..generation import ComfyFootage
                 from ..generation_contract import generation_key
@@ -135,10 +177,16 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
                     brief=brief,
                     note=self.note,
                 )
-                if brief.get("generation") != self.generation_adapter.scope():
-                    raise ValueError(
-                        "Generation profile, workflow or device changed. Save and approve a fresh plan and estimate."
-                    )
+                self.note(
+                    "Preflight: ComfyUI profile, stage capability and available allowance"
+                )
+                generation_preflight(
+                    self.generation_adapter,
+                    stage_scenes,
+                    self.media_cache,
+                    brief,
+                    "sample" if index == 0 else "batch",
+                )
                 # Preparation happens before FFmpeg/speech cache tasks. A slow or
                 # interrupted provider poll does not exhaust parent render retries.
                 for i, scene in enumerate(generated, 1):
@@ -152,8 +200,6 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
                     )
                     self.note(f"Footage ready: {i}/{len(generated)}")
             canonical = parsed.model_dump()
-            self.identity_images()
-            self.notebook_kokoro()  # Resolve the actual model before forming its media dependency key.
 
             def build(folder):
                 return self.build_video(brief, canonical, version, folder)

@@ -40,7 +40,7 @@ def test_review_and_verified_cache_survive_restart(tmp_path):
         if Path(result["path"]).read_bytes() != b"verified":
             raise ValueError("corrupt")
 
-    original, hit = cache.run("scene", "one", build, verify)
+    original, _hit = cache.run("scene", "one", build, verify)
     restored = MediaCache(
         tmp_path / "cache",
         ControlStore(tmp_path / "cache-control.sqlite"),

@@ -2,6 +2,8 @@
 
 Verified on 5 November 2026. The CFC application remains on Python 3.14.7 and Streamlit. ComfyUI runs in a separate Python 3.12.14 environment; Torch and its CUDA dependencies were not installed into the application environment.
 
+The 7 November setup repair adds a separate, publicly downloadable upstream Kokoro runtime, explicit speech downloads, stage-wide preflight and clearer estimates. Use the current [fresh-install commands and verification](setup-generation-verification.md); the measurements and evidence below describe the earlier generation phase.
+
 ## What executes
 
 Planning remains **Local draft / AI concepts**. The independent creation choice is saved in the brief:
@@ -25,7 +27,7 @@ Hardware: NVIDIA GeForce RTX 4050 Laptop GPU, 6,141 MiB VRAM; Intel Core 5 210H,
 
 Memory is sampled while polling; GPU figures cover the whole device and RSS covers the inference process. They are not exact tensor-allocation peaks. Memory pressure was observed: the lowest available physical RAM was approximately 117 MiB in the first GPU run and 425 MiB in the CPU run. CPU experiments require a RAM check and should not be treated as a practical campaign batch engine.
 
-The enabled GPU settings are restricted to the measured 192 x 320 / 9 or 49 frames / 24 fps / 20 steps / strength 1 combinations, with one inference job at a time. CPU enables only its measured 9-frame combination, with one generated scene per approval stage and no batch. Readiness checks actual server type/CPU flag, software and execution flags, model checksums, workflow connections, physical/available RAM and the measured GPU's memory. Lowering the old `COMFY_MIN_VRAM_GB` setting does not establish compatibility; that setting is no longer used.
+The enabled GPU settings are restricted to the measured 192 x 320 / 9 or 49 frames / 24 fps / 20 steps / strength 1 combinations, with one inference job at a time. CPU enables only its measured 9-frame combination for one generated sample scene and no campaign batch. Readiness checks actual server type/CPU flag, software and execution flags, model checksums, workflow connections, physical/available RAM and the measured GPU's memory. Lowering the old `COMFY_MIN_VRAM_GB` setting does not establish compatibility; that setting is no longer used.
 
 **Quality limitation:** the small, heavily quantized, older model visibly changes the illustrated bottle's appearance. It is an experimental generation demonstration, not approved product-faithful advertising. Higher resolution, other models, native 20-second generation and a complete 15-generated-scene campaign were not live-verified. A 49-frame clip is about 2.04 seconds; FFmpeg explicitly loops it to the approved scene duration. The final video is 20 seconds, not a native 20-second model output. Human review remains mandatory.
 

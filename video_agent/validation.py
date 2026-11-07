@@ -1,7 +1,7 @@
 """Pure checks for claims, timing, assets and captions."""
 
 import re
-from .models import *
+from .models import CampaignPlan
 from .prompts import BANNED_COPY
 from .facts import normalized, copy_issues
 from .generation_contract import creation_issues

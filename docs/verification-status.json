@@ -1,6 +1,6 @@
 {
-  "verified_on": "2026-11-05",
-  "scope": "Actual local CPU/GPU ComfyUI inference, image-conditioning comparison, combined-source three-video export/revision, automated tests and browser inspection. Adapter existence alone is not integration proof.",
+  "verified_on": "2026-11-07",
+  "scope": "Fresh public hash-locked application and separate TTS installations, actual missing-speech negative check, real CUDA generation/export/revision, current cached re-export, automated tests and browser inspection; controlled responses alone are not inference evidence.",
   "tasks": [
     {
       "task": "External editing-app MCP",
@@ -29,7 +29,7 @@
     {
       "task": "Actual AI footage generation",
       "status": "implemented",
-      "verification_evidence": "Actual LTX-Video 2B Q3_K_S GGUF inference on the RTX 4050 Laptop GPU (6141 MiB): 192x320, 9 frames in 49.89 s and 49 frames in 53.90 s, sampled peak whole-device use 2955 MiB. Four actual campaign generation jobs completed through submit/poll/download/full decode and FFmpeg export. Reports: tmp/comfy-verification and tmp/generated-demo-20261105/generation_demo_report.json.",
+      "verification_evidence": "Four actual image-conditioned RTX 4050 CUDA jobs completed in the fresh Python 3.14 application with separate supported Kokoro speech: 192x320, 49 frames, 24 fps, 20 steps, recorded elapsed 86.32-112.57 s. Submit/poll/download/full decode and FFmpeg export passed. Evidence: tmp/setup-demo-20261107/verification-audit.json. Earlier CPU/GPU benchmarks remain under tmp/comfy-verification.",
       "remaining_dependency": "Experimental low-resolution footage is looped to scene duration. Visible product-shape drift requires human review. Higher resolution, native 20-second clips and a full 15-generated-scene campaign were not live-verified. Local benchmark profiles and checksum-verified weights must remain available."
     },
     {
@@ -53,51 +53,53 @@
     {
       "task": "Complete local three-video demo and targeted revision",
       "status": "implemented",
-      "verification_evidence": "Combined mode used one actual generated scene and four supplied-image scenes per video, real cached Kokoro voice, original music and captions. Both checkpoint/export rounds completed; revising only video 3's generation seed retained identical MP4 hashes and cache hits for videos 1 and 2. All final videos fully decoded at 1080x1920 / 20 s with non-silent audio. Actual mixed-audio local transcription matched the sample script. Approvals were explicitly simulated in an isolated technical-test campaign, not human advertising approval.",
+      "verification_evidence": "Actual generated opening + four supplied-image scenes per video; real upstream Kokoro in Python 3.12, original music, captions and full MP4 decode. Plan/sample/final test approvals, video-3 seed revision and export passed. Videos 1/2 retained identical hashes. A current version-3 export reused every video byte with all HTTP blocked and zero new generation jobs; all reservations settled. Evidence: tmp/setup-demo-20261107/{generation_demo_report,cached-export-report,verification-audit}.json. Technical test approvals are not human advertising approval.",
       "remaining_dependency": "Human review/approval before real advertising use; this was a technical workflow verification, not campaign-performance validation."
+    },
+    {
+      "task": "Reproducible local speech setup and generation preflight",
+      "status": "implemented",
+      "verification_evidence": "Empty Python 3.14 app environment installed 95 public hash-locked packages with cache disabled. A new Python 3.12 Kokoro environment installed 16 public hash-locked packages and newly downloaded both SHA-256-verified models, then synthesized actual audio. Actual empty-speech-runtime check produced zero footage POST attempts/tasks/reservations. Editing, voice, assets, measured profile/device, stage capability and stage-wide new-job allowance precede footage. Setup UI reports separate dated readiness states and explicit background setup progress. Nine focused preflight regressions and two additional UI checks pass.",
+      "remaining_dependency": "Windows x64 fresh virtual environments were tested; other operating systems and a fresh OS image were not. FFmpeg/FFprobe and uv remain explicit prerequisites. CPU profile allows one generated sample scene, not batches. Paid speech access/quota is not proven by a credential check."
     }
   ],
   "test_summary": {
     "python": "3.14.7",
-    "passed": 98,
+    "passed": 109,
     "live_api_credits_consumed": 0,
-    "notes": "98 passed in 120.40 seconds, including 15 focused generation protocol/policy tests; 13 existing third-party LangSmith deprecation warnings. Live CPU/GPU inference and export evidence is separate from controlled-response tests. Eight actual browser screens passed overflow/JavaScript checks at desktop and mobile widths."
+    "notes": "Final suite: 109 passed in 114.46 s, 13 existing LangSmith deprecation warnings. Nine preflight regressions include zero-footage missing-voice failures and cached recovery after assembly failure. Ruff F/RUF059 and formatting checks pass. Six fresh-install desktop/mobile browser screens passed JavaScript/overflow checks; these are separate from automated tests and real inference evidence."
   },
   "changed_files": [
     ".env.example",
     "README.md",
-    "app_pages/architecture.py",
     "app_pages/brief.py",
     "app_pages/connections.py",
     "app_pages/plan.py",
-    "app_pages/videos.py",
-    "docs/frontend-verification.md",
     "docs/local-generation.md",
-    "docs/verification-status.json",
-    "scripts/prepare_ui_preview.py",
-    "scripts/register_comfy_profile.py",
-    "scripts/setup_comfy.py",
-    "scripts/verify_comfy_workflow.py",
-    "scripts/verify_generation_demo.py",
+    "docs/setup-generation-verification.md",
+    "requirements-app.lock",
+    "requirements-app.txt",
+    "requirements-notebook.txt",
+    "requirements-tts.in",
+    "requirements-tts.txt",
+    "requirements.txt",
+    "scripts/setup_tts.py",
+    "scripts/tts_worker.py",
     "tests/test_app.py",
-    "tests/test_generation.py",
-    "video_agent/campaigns.py",
-    "video_agent/control.py",
-    "video_agent/generation.py",
-    "video_agent/generation_contract.py",
+    "tests/test_inputs_and_recovery.py",
+    "tests/test_preflight.py",
+    "tests/test_workflow.py",
     "video_agent/jobs.py",
-    "video_agent/models.py",
     "video_agent/planning.py",
-    "video_agent/prompts.py",
-    "video_agent/rendering/editor.py",
+    "video_agent/preflight.py",
+    "video_agent/rendering/audio.py",
     "video_agent/rendering/pipeline.py",
     "video_agent/rendering/renderer.py",
+    "video_agent/rendering/voice.py",
     "video_agent/service.py",
-    "video_agent/storage.py",
-    "video_agent/timeline.py",
     "video_agent/ui.py",
+    "video_agent/usage.py",
     "video_agent/validation.py",
-    "video_agent/workflow.py",
-    "workflows/ltx-2b-gguf-i2v.json"
+    "video_agent/voice_setup.py"
   ]
 }

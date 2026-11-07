@@ -1,0 +1,6 @@
+# Supported upstream Kokoro is isolated from the Python 3.14 application.
+# Regenerate on Python 3.12: uv pip compile requirements-tts.in --python-version 3.12 --generate-hashes -o requirements-tts.txt
+kokoro-onnx==0.6.1
+onnxruntime==1.31.1
+numpy==2.4.6
+soundfile==0.14.0

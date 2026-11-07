@@ -17,6 +17,7 @@ from .storage import (
     signature,
     reset_approval,
     review_content,
+    now,
 )
 from .control import DEFAULT_LIMITS
 from .timeline import ad_key, revise_timeline
@@ -1120,6 +1121,71 @@ class CampaignService:
                     )
 
         return self.jobs.submit("api-diagnostics", "Checking API connections", check)
+
+    def check_local_setup(self):
+        def check():
+            from .preflight import editing_readiness, voice_readiness
+            from .rendering.voice import local_voice
+            from .generation import ComfyFootage
+
+            keys = self.settings.keys(self.secrets)
+            results = dict(
+                editing=editing_readiness(),
+                voice=voice_readiness(self.settings.model_dir, keys),
+            )
+            self.jobs.note(
+                "local-setup",
+                "Checking local speech dependencies, model hashes and actual CPU warm-up",
+            )
+            try:
+                engine = local_voice(self.settings.model_dir, keys)
+                results["voice"] = dict(
+                    available=True,
+                    message="Separate Kokoro runtime, model SHA-256, phonemizer and actual voice warm-up passed.",
+                    python=engine.info["python"],
+                )
+            except (ValueError, RuntimeError, OSError) as error:
+                results["voice"] = dict(available=False, message=str(error))
+            self.jobs.note(
+                "local-setup",
+                "Checking actual ComfyUI device and measured profile; no footage is generated",
+            )
+            try:
+                results["footage"] = ComfyFootage(
+                    keys, self.repository.control, "local-setup"
+                ).readiness()
+            except (ValueError, RuntimeError, OSError) as error:
+                results["footage"] = dict(available=False, message=str(error))
+            save_json(
+                self.settings.data_dir / "local_setup.json",
+                dict(checked_at=now(), results=results),
+            )
+            self.jobs.note(
+                "local-setup",
+                "Readiness checks finished. Inspect each component's actual result below.",
+            )
+
+        return self.jobs.submit("local-setup", "Checking local setup", check)
+
+    def setup_local_voice(self):
+        def setup():
+            from scripts.setup_tts import setup as install
+            from .voice_setup import tts_python
+
+            install(
+                tts_python(self.settings.keys(self.secrets)).parent.parent,
+                True,
+                self.settings.model_dir,
+                lambda message: self.jobs.note("local-setup", message),
+            )
+            self.jobs.note(
+                "local-setup",
+                "Dependencies/models installed. Use Check local setup to verify actual voice inference.",
+            )
+
+        return self.jobs.submit(
+            "local-setup", "Setting up local voice (explicit download)", setup
+        )
 
     def close(self):
         self.jobs.close()

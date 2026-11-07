@@ -2,10 +2,10 @@
 
 import re, wave
 import numpy as np
-import requests
 import soundfile as sf
 import imageio_ffmpeg
-from ..config import *
+from pathlib import Path
+from ..config import AUDIO_SR
 from ..storage import save_json
 from ..storage import digest
 
@@ -14,20 +14,10 @@ FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 class AudioMixin:
     def ensure_notebook_model(self, name, size):
-        path = self.model_dir / name
-        if path.exists() and path.stat().st_size == size:
-            return path
-        partial = path.with_suffix(path.suffix + ".part")
-        self.note("Downloading local voice model: " + name)
-        with requests.get(MODEL_BASE + name, stream=True, timeout=(10, 60)) as response:
-            response.raise_for_status()
-            with partial.open("wb") as output:
-                for chunk in response.iter_content(1024 * 1024):
-                    output.write(chunk)
-        if partial.stat().st_size != size:
-            raise RuntimeError("Incomplete model download: " + name)
-        partial.replace(path)
-        return path
+        from ..voice_setup import validate_voice_models
+
+        validate_voice_models(self.model_dir)
+        return self.model_dir / name
 
     def spoken_text(self, text):
         substitutions = self.brief.get("pronunciations", {})
@@ -93,7 +83,7 @@ class AudioMixin:
                         "en-us",
                     ]
                 )
-                result, hit = self.media_cache.run(
+                result, _hit = self.media_cache.run(
                     "speech",
                     key,
                     synthesize,

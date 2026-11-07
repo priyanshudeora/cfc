@@ -19,6 +19,9 @@ imageio-ffmpeg>=0.6,<1
 # Draws animated frame gradients and synthesizes/mixes the original music bed.
 numpy>=2,<3
 
+# Reads/writes PCM audio; the actual Kokoro runtime is isolated in .venv-tts.
+soundfile==0.14.0
+
 # Loads API keys from the local .env file into Python.
 python-dotenv>=1,<2
 

@@ -70,6 +70,22 @@ class JobManager:
                 job.progress = max(
                     job.progress, 0.25 * int(footage[1]) / int(footage[2])
                 )
+            if cid == "local-setup":
+                download = re.search(
+                    r"(kokoro-v1\.0\.int8\.onnx|voices-v1\.0\.bin): (\d+)%",
+                    str(message),
+                )
+                if download:
+                    base, weight = (
+                        (0.2, 0.6) if download[1].startswith("kokoro") else (0.8, 0.15)
+                    )
+                    job.progress = max(
+                        job.progress, base + weight * int(download[2]) / 100
+                    )
+                elif "Installing public" in str(message):
+                    job.progress = max(job.progress, 0.08)
+                elif "Checking actual ComfyUI" in str(message):
+                    job.progress = max(job.progress, 0.8)
             if scene:
                 job.progress = max(
                     job.progress, min(0.9, 0.3 + int(scene.group(1)) * 0.1)

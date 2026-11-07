@@ -51,6 +51,9 @@ with st.expander("Campaign direction"):
 
 generation = state["brief"].get("generation", {})
 if generation:
+    from video_agent.usage import footage_estimate
+
+    media_estimate = footage_estimate(state["plan"]["ads"])
     sample_jobs = sum(
         s["edit"]["mode"] != "reused" for s in state["plan"]["ads"][0]["scenes"]
     )
@@ -60,7 +63,19 @@ if generation:
         for s in a["scenes"]
     )
     st.info(
-        f"Local AI footage estimate: up to {sample_jobs} sample jobs, then {remaining_jobs} remaining jobs after sample approval. Completed matching clips are reused. One inference job runs at a time; electricity and run time are not priced."
+        f"{media_estimate['generated_scenes']} generated scenes · {media_estimate['reused_scenes']} reused scenes. Up to {sample_jobs} sample generation jobs, then {remaining_jobs} remaining jobs after sample approval. Completed matching clips are reused. One inference job runs at a time; electricity and run time are not priced."
+    )
+    for clip in media_estimate["clips"]:
+        st.caption(
+            f"Native generated clip: {clip['resolution']} · {clip['frames']} frames at {clip['fps']} fps · {clip['native_seconds']:.3f} seconds. "
+            + (
+                f"Loops to fill a {clip['scene_seconds']}-second scene."
+                if clip["loops"]
+                else f"Trimmed/fitted to a {clip['scene_seconds']}-second scene."
+            )
+        )
+    st.caption(
+        "Each final export is 20 seconds after editing; the model does not generate a native 20-second clip. Experimental low-resolution footage may change product shape, colour or branding. Human sample review is required."
     )
     st.caption(
         "Execution: "
@@ -101,7 +116,7 @@ if generation:
                 st.rerun()
     if not generation.get("batch_enabled"):
         st.warning(
-            "Experimental profile: one generated scene per stage. Batch generation is disabled; the remaining videos need a separately approved measured batch profile."
+            "Experimental profile: one generated sample scene only. Batch generation is disabled; the remaining videos need a separately approved measured batch profile."
         )
 
 for col, ad in zip(st.columns(3), state["plan"]["ads"]):

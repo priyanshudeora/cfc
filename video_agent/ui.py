@@ -78,10 +78,10 @@ def workflow_indicator(snapshot):
 
 
 @st.cache_resource(max_entries=1)
-def get_service(data_dir=None, backend_revision="ai-footage-1"):
+def get_service(data_dir=None, backend_revision="ai-footage-preflight-2"):
     from .service import CampaignService
 
-    if backend_revision != "ai-footage-1":
+    if backend_revision != "ai-footage-preflight-2":
         raise ValueError("Reload the application backend after an interface update.")
     settings = Settings(data_dir=Path(data_dir)) if data_dir else Settings()
     try:
@@ -154,6 +154,8 @@ def activity(cid):
         st.rerun()
     if job["status"] == "running":
         st.progress(job["progress"], text=job["title"])
+        if cid == "local-setup" and job["events"]:
+            st.caption(job["events"][-1])
         if cid != "api-diagnostics":
             footage_tasks = [
                 t
@@ -179,7 +181,7 @@ def activity(cid):
                         f"{count} {status}" for status, count in counts.items() if count
                     )
                 )
-        if cid != "api-diagnostics" and st.button(
+        if cid not in ["api-diagnostics", "local-setup"] and st.button(
             "Stop queued and future work",
             key="stop_job_" + job["id"],
             icon=":material/stop_circle:",
@@ -267,7 +269,7 @@ def download(label, path, name=None, mime=None, key=None, primary=False):
 
 
 def review_toolbar(api, cid, snapshot, location):
-    state, stage = snapshot["state"], snapshot["stage"]
+    stage = snapshot["stage"]
     token = snapshot["signature"]
     with st.container(horizontal=True):
         if st.button(

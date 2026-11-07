@@ -15,7 +15,9 @@ cd /d "C:\path\to\cfc"
 python --version
 python -m venv .venv
 .venv\Scripts\activate
-python -m pip install --no-compile -r requirements-app.txt
+python -m pip install uv==0.12.19
+uv pip sync --no-cache --require-hashes --python .venv\Scripts\python.exe requirements-app.lock
+python scripts\setup_tts.py --download-models
 copy .env.example .env
 ffprobe -version
 python -m streamlit run streamlit_app.py
@@ -23,7 +25,9 @@ python -m streamlit run streamlit_app.py
 
 Install [FFmpeg with FFprobe](https://ffmpeg.org/download.html) and put `ffprobe.exe` on PATH. Encoding uses the FFmpeg executable provided by `imageio-ffmpeg`, including its subtitles/ASS filters. With the environment already installed, `run_app.cmd` launches the app. The default address is `http://127.0.0.1:8501`.
 
-The **Local template** planner and **Local Kokoro** voice need no API key. Kokoro downloads its roughly 120 MB model files on an explicit generation request, then reuses them. Its Python 3.14-compatible package revision and archive checksum are pinned in `requirements-tts.txt`.
+The **Local draft** planner and **Local Kokoro** voice need no API key. Supported upstream `kokoro-onnx==0.6.1` runs in its own **Python 3.12** environment, `.venv-kokoro`, outside the Python 3.14 application. `requirements-tts.txt` pins every speech dependency and its public PyPI hashes. The unavailable fork archive has been removed. `setup_tts.py` creates an owned environment and explicitly downloads roughly 120 MB of SHA-256-verified models. It refuses unrelated existing environments. Inference and generation never install dependencies or download speech models.
+
+Use **Settings & tools → API connections → Check local setup** for independent editing, local voice and AI-footage checks. **Set up local voice / download models** is an explicit background setup action with progress/errors. `CFC_TTS_PYTHON` optionally selects another supported runtime. An editing-only campaign needs no ComfyUI; narrated exports still need a working selected voice. Before any new footage job the renderer checks editing tools, product files, actual speech initialization, generation profile/device, stage capability and remaining allowance. Completed footage remains cached if later assembly fails. [Fresh-install and generation verification](docs/setup-generation-verification.md).
 
 Local voice initialization calls the supported [`onnxruntime.disable_telemetry_events()` API](https://onnxruntime.ai/docs/api/python/api_summary.html#onnxruntime.disable_telemetry_events) before constructing inference sessions. Cached inference is tested with Python HTTP requests rejected. A sampled native TCP check during the local verification observed no external connections; it is not a packet capture or a guarantee about all process startup traffic. Model installation/download is separate from cached inference.
 

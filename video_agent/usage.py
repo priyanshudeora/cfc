@@ -47,6 +47,7 @@ def estimate(brief, ads):
         for ad in ads
         for scene in ad["scenes"]
     )
+
     counts = charge(
         dict(
             speech_characters=chars if external_voice else 0,
@@ -71,4 +72,37 @@ def estimate(brief, ads):
         generation_provider="Optional local ComfyUI"
         if generations
         else "Reused assets / image-based motion graphics",
+    )
+
+
+def footage_estimate(ads):
+    """Describe native generation separately from final scene/export duration."""
+    scenes = [s for ad in ads for s in ad["scenes"]]
+    generated = [s for s in scenes if s["edit"]["mode"] != "reused"]
+    specs = []
+    for scene in generated:
+        settings = scene["edit"].get("generation_settings")
+        if not settings:
+            continue
+        native = settings["frames"] / settings["fps"]
+        item = dict(
+            resolution=f"{settings['width']} × {settings['height']}",
+            frames=settings["frames"],
+            fps=settings["fps"],
+            native_seconds=round(native, 3),
+            scene_seconds=scene["seconds"],
+            loops=scene["seconds"] > native,
+        )
+        if item not in specs:
+            specs.append(item)
+    return dict(
+        generated_scenes=len(generated),
+        reused_scenes=len(scenes) - len(generated),
+        sample_jobs=sum(s["edit"]["mode"] != "reused" for s in ads[0]["scenes"])
+        if ads
+        else 0,
+        remaining_jobs=sum(
+            s["edit"]["mode"] != "reused" for ad in ads[1:] for s in ad["scenes"]
+        ),
+        clips=specs,
     )

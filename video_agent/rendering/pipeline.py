@@ -2,7 +2,7 @@
 
 import json, shutil, subprocess, sys
 import imageio_ffmpeg
-from ..config import *
+from ..config import RENDER_VERSION, VIDEO_SIZE
 from ..storage import save_json, read_json
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
@@ -168,7 +168,11 @@ class RenderMixin:
             quality=quality,
             folder=str(folder),
             renderer_version=RENDER_VERSION,
-            tts_runtime={"python": sys.version.split()[0], "separate_worker": False},
+            tts_runtime=getattr(
+                self,
+                "tts_runtime",
+                {"python": sys.version.split()[0], "separate_worker": None},
+            ),
         )
         save_json(folder / "result.json", result)
         return result

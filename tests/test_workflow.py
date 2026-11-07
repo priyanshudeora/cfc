@@ -132,7 +132,7 @@ def test_full_review_flow(studio):
 
 def test_stale_approval_manual_edit_and_cancellation(studio):
     cid = make_campaign(studio)
-    runtime, rendered = stub_runtime(studio, cid)
+    _runtime, rendered = stub_runtime(studio, cid)
     old = studio.snapshot(cid)
     edited = copy.deepcopy(old["state"]["plan"])
     edited["summary"] = "Manually revised campaign direction."
@@ -158,7 +158,7 @@ def test_stale_approval_manual_edit_and_cancellation(studio):
 
 def test_failed_save_blocks_media(studio, monkeypatch):
     cid = make_campaign(studio)
-    runtime, rendered = stub_runtime(studio, cid)
+    _runtime, rendered = stub_runtime(studio, cid)
     original = studio.repository.approve
     monkeypatch.setattr(
         studio.repository,

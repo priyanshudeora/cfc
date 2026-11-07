@@ -7,6 +7,75 @@ from video_agent.storage import read_json
 
 api = service()
 keys = api.settings.keys(api.secrets)
+st.subheader("Local production readiness")
+st.caption(
+    "Editing, speech and AI footage are separate capabilities. Editing-only campaigns need no ComfyUI; narrated exports still require the selected voice engine."
+)
+from video_agent.preflight import editing_readiness, voice_readiness
+
+setup_path = api.settings.data_dir / "local_setup.json"
+saved_setup = read_json(setup_path) if setup_path.exists() else {}
+footage_hint = dict(
+    available=None,
+    message="Profile files present; connectivity, actual device, memory and workflow have not been checked. Start the measured server using docs/local-generation.md, then Check local setup. Editing does not require it.",
+)
+for variable in ["COMFY_WORKFLOW", "COMFY_PROFILE"]:
+    if not Path(keys.get(variable) or "__missing__").is_file():
+        footage_hint = dict(
+            available=False,
+            message=f"{variable} is missing or its file is unavailable. Set up ComfyUI with python scripts/setup_comfy.py --root C:\\CFC-Comfy --device cuda --download-models, then run verify_comfy_workflow.py and register_comfy_profile.py as documented in docs/local-generation.md. Set the measured workflow/profile path in .env; setup alone is not verification.",
+        )
+        break
+local_results = saved_setup.get("results") or dict(
+    editing=editing_readiness(),
+    voice=voice_readiness(api.settings.model_dir, keys),
+    footage=footage_hint,
+)
+if saved_setup:
+    st.caption(
+        "Recorded check: "
+        + saved_setup["checked_at"]
+        + ". Recheck after installing or changing files/server settings."
+    )
+for col, (component, title) in zip(
+    st.columns(3),
+    [("editing", "Editing"), ("voice", "Local voice"), ("footage", "AI footage")],
+):
+    with col.container(border=True, height="stretch"):
+        result = local_results[component]
+        st.markdown("**" + title + "**")
+        st.badge(
+            "Ready"
+            if result["available"] is True
+            else "Missing / unavailable"
+            if result["available"] is False
+            else "Verification needed",
+            color="green" if result["available"] is True else "orange",
+        )
+        st.caption(result["message"])
+with st.container(horizontal=True):
+    if st.button(
+        "Check local setup",
+        key="check_local_setup",
+        disabled=api.jobs.busy("local-setup"),
+    ):
+        api.check_local_setup()
+        st.rerun()
+    if st.button(
+        "Set up local voice / download models",
+        key="setup_local_voice",
+        disabled=api.jobs.busy("local-setup"),
+    ):
+        api.setup_local_voice()
+        st.rerun()
+st.caption(
+    "Explicit setup installs public, hash-locked Kokoro dependencies in a separate Python 3.12 environment and downloads about 120 MB of SHA-256-verified models. Existing unowned environments are never overwritten. It does not generate footage or approve a campaign."
+)
+st.code(
+    "python -m pip install uv==0.12.19\npython scripts\\setup_tts.py --download-models",
+    language="bash",
+)
+activity("local-setup")
 st.markdown(
     "Check each provider with a small request and inspect the actual response. Keys stay in `.env` or Streamlit secrets."
 )

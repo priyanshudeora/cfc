@@ -71,6 +71,27 @@ else:
         st.info(
             "Saving creates a new plan that needs approval again. Previous video files are retained."
         )
+    st.caption(
+        "Local voice setup: python scripts\\setup_tts.py --download-models. Settings & tools → API connections shows editing, voice and AI-footage readiness separately."
+    )
+    try:
+        from video_agent.storage import read_json
+        from pathlib import Path
+
+        profile_path = Path(
+            api.settings.keys(api.secrets).get("COMFY_PROFILE") or "__unconfigured__"
+        )
+        if (
+            profile_path.is_file()
+            and read_json(profile_path).get("batch_enabled") is False
+        ):
+            st.warning(
+                "The configured CPU/experimental profile supports one generated sample scene only. Combined mode can test its opening sample; remaining-video batches are blocked. Generate mode's five-scene sample is also blocked. Complete campaign generation needs a separately measured batch-capable profile and fresh approval. Editing-only campaigns remain available; no creation mode is changed automatically."
+            )
+    except (ValueError, OSError, TypeError):
+        st.info(
+            "AI-footage profile cannot be read. Check local setup before choosing generated footage."
+        )
     with st.form("edit_campaign_brief" if editing else "create_campaign", border=True):
         details, assets = st.columns([1.45, 1], gap="large")
         with details:

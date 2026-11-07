@@ -163,6 +163,43 @@ def test_creation_preserves_provider_selection_without_calling_it(app, monkeypat
     assert calls[0][1]["creation_mode"] == "combine"
 
 
+def test_cpu_experiment_is_explained_before_campaign_creation(
+    app, monkeypatch, tmp_path
+):
+    import json
+
+    at, api = app
+    profile = tmp_path / "cpu-ui.json"
+    profile.write_text(json.dumps(dict(device="cpu", batch_enabled=False)))
+    monkeypatch.setenv("COMFY_PROFILE", str(profile))
+    at.button(key="new_campaign_button").click().run()
+    assert not at.exception
+    assert any("one generated sample scene only" in item.value for item in at.warning)
+    assert at.selectbox(key="creation_mode").value == "edit"
+    assert not api.repository.control.tasks(at.session_state["active_campaign"])
+
+
+def test_separate_setup_states_do_not_report_unverified_voice_as_ready(
+    app, monkeypatch
+):
+    at, _api = app
+    monkeypatch.setattr(
+        "video_agent.preflight.editing_readiness",
+        lambda: dict(available=True, message="Editing ready"),
+    )
+    monkeypatch.setattr(
+        "video_agent.preflight.voice_readiness",
+        lambda *args: dict(
+            available=None, message="Voice files present; actual inference not checked"
+        ),
+    )
+    at.switch_page("app_pages/connections.py").run()
+    assert not at.exception
+    assert any("actual inference not checked" in item.value for item in at.caption)
+    assert any("Verification needed" in item.value for item in at.markdown)
+    assert at.button(key="check_local_setup") and at.button(key="setup_local_voice")
+
+
 def test_editing_preserves_hidden_backend_settings(app, monkeypatch):
     from test_workflow import make_campaign
     from video_agent.control import DEFAULT_LIMITS

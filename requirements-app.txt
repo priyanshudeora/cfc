@@ -1,8 +1,8 @@
 # Shared planning, validation, image, audio and video dependencies.
 -r requirements.txt
 
-# Python 3.14-compatible local speech and WAV audio support.
--r requirements-tts.txt
+# Local Kokoro runs in a separate supported Python 3.12 environment.
+# See scripts/setup_tts.py; do not install requirements-tts.txt in Python 3.14.
 
 # Browser frontend, forms, video playback, navigation and background progress UI.
 streamlit>=1.66,<2

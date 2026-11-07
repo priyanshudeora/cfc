@@ -8,9 +8,17 @@ from PIL import Image
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from .models import *
-from .prompts import *
-from .validation import *
+from .models import AdPlan, CampaignPlan, CopyReview
+from .prompts import (
+    BANNED_COPY,
+    BASE_SYSTEM,
+    CREATIVE_DIRECTION,
+    PROMPT_VERSION,
+    REVIEW_SYSTEM,
+    REVISION_SYSTEM,
+    WRITER_SYSTEM,
+)
+from .validation import factual_review_issues, fit_narration_timing, plan_copy_issues
 from .storage import read_json, save_json, digest
 from .connections import api_json, ProviderResponseError
 from .control import DEFAULT_LIMITS
@@ -53,9 +61,6 @@ class Planner:
         descriptions = []
         for asset in self.assets.values():
             path = Path(asset["path"])
-            mime = {".png": "image/png", ".webp": "image/webp"}.get(
-                path.suffix.lower(), "image/jpeg"
-            )
             label = f"Asset {asset['asset_id']}: {asset['use']}; {asset['title']}"
             parts.append({"type": "text", "text": label})
             with Image.open(path) as photo:
