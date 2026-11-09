@@ -149,7 +149,102 @@ class CampaignService:
             if state.get("plan")
             else [],
             job=self.jobs.get(cid),
+            generation_blocker=self.generation_approval_blocker(state, stage),
         )
+
+    def generation_approval_blocker(self, state, stage):
+        if stage not in [
+            "approve_plan",
+            "ready_sample",
+            "approve_sample",
+        ] or not state.get("plan"):
+            return ""
+        from .generation_contract import generation_key, stage_generation_issue
+        from .cache import file_hash
+
+        ads = (
+            state["plan"]["ads"][:1]
+            if stage != "approve_sample"
+            else state["plan"]["ads"][1:]
+        )
+        brief, cid = state["brief"], state["campaign_id"]
+        new = set()
+        for ad in ads:
+            for scene in ad["scenes"]:
+                if scene.get("edit", {}).get("mode", "reused") == "reused":
+                    continue
+                key = generation_key(scene, brief)
+                manifest = (
+                    self.repository.folder(cid)
+                    / "cache/generation"
+                    / key
+                    / "cache.json"
+                )
+                try:
+                    entry = read_json(manifest)
+                    if entry["hashes"] and all(
+                        Path(p).is_file() and file_hash(p) == sha
+                        for p, sha in entry["hashes"].items()
+                    ):
+                        continue
+                except (OSError, ValueError, KeyError):
+                    pass
+                task = self.repository.control.task(cid, "generation:" + key)
+                if (
+                    not task
+                    or not task.get("provider_id")
+                    or task["status"] in ["failed", "cancelled", "paused"]
+                ):
+                    new.add(key)
+        import json
+
+        spent = sum(
+            json.loads(u["actual"] if u["status"] == "settled" else u["reserved"]).get(
+                "generation_jobs", 0
+            )
+            for u in self.repository.control.usage(cid)
+        )
+        return stage_generation_issue(
+            brief,
+            ads,
+            "sample" if stage != "approve_sample" else "batch",
+            new_jobs=len(new),
+            remaining_jobs=brief.get("limits", {}).get("generation_jobs", 0) - spent,
+        )
+
+    def generation_previews(self, cid):
+        """Expose current scene provenance, including completed clips after failure."""
+        from .generation_contract import generation_key
+
+        state = self.snapshot(cid)["state"]
+        sources = []
+        for ad_index, ad in enumerate(state.get("plan", {}).get("ads", [])):
+            for scene_index, scene in enumerate(ad["scenes"]):
+                if scene["edit"]["mode"] == "reused":
+                    continue
+                key = generation_key(scene, state["brief"])
+                task = self.repository.control.task(cid, "generation:" + key) or {}
+                source = dict(
+                    source="planned AI footage",
+                    status=task.get("status", "not submitted"),
+                    provider_id=task.get("provider_id", ""),
+                    error=task.get("error", ""),
+                )
+                try:
+                    saved = read_json(
+                        self.repository.folder(cid)
+                        / "cache/generation"
+                        / key
+                        / "cache.json"
+                    )
+                    source.update(saved["result"])
+                except (OSError, ValueError, KeyError):
+                    pass
+                source.update(
+                    ad_index=ad_index, scene_index=scene_index, title=ad["title"]
+                )
+                sources.append(source)
+        return sources
 
     def missing_assets(self, cid, ads):
         runtime = self.runtime(cid)
@@ -602,20 +697,9 @@ class CampaignService:
                 "ready_sample",
                 "approve_sample",
             ]:
-                scoped_ads = (
-                    state["plan"]["ads"][:1]
-                    if stage != "approve_sample"
-                    else state["plan"]["ads"][1:]
-                )
-                jobs = estimate(state["brief"], scoped_ads)["generation_jobs"]
-                if (
-                    jobs > 1
-                    and state["brief"].get("generation", {}).get("batch_enabled")
-                    is False
-                ):
-                    raise ValueError(
-                        "This experimentation profile permits one generated scene per stage. Batch is not enabled; use a measured batch profile and review a fresh plan."
-                    )
+                blocker = self.generation_approval_blocker(state, stage)
+                if blocker:
+                    raise ValueError(blocker)
             answer = dict(
                 action=action,
                 signature=current["signature"],

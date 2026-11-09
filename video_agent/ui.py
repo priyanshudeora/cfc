@@ -34,6 +34,68 @@ FORMAT_NAMES = {
 }
 
 
+def generated_clip_panel(sources):
+    """Raw model clips and original job IDs; never initiate generation here."""
+    generated = [
+        (i, s)
+        for i, s in enumerate(sources, 1)
+        if s.get("source") in ["generated footage", "compositing", "planned AI footage"]
+    ]
+    if not generated:
+        st.caption(
+            (
+                "Supplied media / image animation only. "
+                if sources
+                else "No generated-clip provenance is recorded for this preview. "
+            )
+            + "AI concepts writes scripts; Creation controls the footage source."
+        )
+        return
+    st.markdown("**Generated clips**")
+    st.caption(
+        "Raw model output before FFmpeg adds layout, narration, music and captions. Cached clips retain their original ComfyUI job IDs."
+    )
+    for i, source in generated:
+        label = f"Generated clip · Scene {source.get('scene_index', i - 1) + 1}"
+        if source.get("title"):
+            label += " · " + source["title"]
+        with st.expander(label):
+            identifier = source.get("provider_id", "")
+            st.caption("ComfyUI job ID: " + (identifier or "Not submitted"))
+            st.caption(
+                "Workflow: "
+                + (
+                    source.get("workflow_name")
+                    or source.get("workflow_sha256")
+                    or "See the saved campaign profile"
+                )
+            )
+            if source.get("models"):
+                st.caption("Models: " + ", ".join(source["models"]))
+            if source.get("workflow_sha256"):
+                st.caption("Workflow SHA-256: " + source["workflow_sha256"])
+            path = Path(source.get("path") or "__missing__")
+            if path.is_file():
+                st.video(
+                    str(path),
+                    format="video/webm"
+                    if path.suffix.lower() == ".webm"
+                    else "video/mp4",
+                    alt=label + ", raw model footage",
+                )
+                st.caption(
+                    f"Native clip: {source.get('settings', {}).get('frames', '?')} frames at {source.get('settings', {}).get('fps', '?')} fps. Review product identity; generated footage can distort it."
+                )
+            elif source.get("error"):
+                st.error(source["error"])
+            else:
+                st.info(
+                    "Raw clip is "
+                    + source.get("status", "missing")
+                    + ". Use Retry after resolving the error; completed clips remain cached."
+                )
+
+
 def workflow_step(snapshot):
     """Present persisted state without treating page navigation as progress."""
     state, stage = snapshot.get("state", {}), snapshot.get("stage", "")
@@ -78,10 +140,10 @@ def workflow_indicator(snapshot):
 
 
 @st.cache_resource(max_entries=1)
-def get_service(data_dir=None, backend_revision="ai-footage-preflight-2"):
+def get_service(data_dir=None, backend_revision="stage-gates-raw-clips-3"):
     from .service import CampaignService
 
-    if backend_revision != "ai-footage-preflight-2":
+    if backend_revision != "stage-gates-raw-clips-3":
         raise ValueError("Reload the application backend after an interface update.")
     settings = Settings(data_dir=Path(data_dir)) if data_dir else Settings()
     try:

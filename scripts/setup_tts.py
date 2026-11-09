@@ -45,7 +45,9 @@ def setup(environment=None, download=False, model_dir=None, note=print):
             raise ValueError(
                 "The target exists without Python; choose a fresh --environment path."
             )
-        commands.append([uv, "venv", "--python", "3.12", str(environment)])
+        commands.append(
+            [uv, "venv", "--no-project", "--python", "3.12", str(environment)]
+        )
     commands.append(
         [
             uv,

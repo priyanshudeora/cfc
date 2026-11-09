@@ -1,14 +1,13 @@
 # Reproducible setup and generation preflight
 
-Updated 7 November 2026. This supplements the earlier measurements in [local-generation.md](local-generation.md). Existing campaigns, saved limits/rates, approvals and generation cache identities are preserved.
+Setup instructions updated 9 November 2026; measurements below retain their original dates. This supplements the earlier measurements in [local-generation.md](local-generation.md). Existing campaigns, saved limits/rates, approvals and generation cache identities are preserved.
 
 ## Supported environments and public dependencies
 
 The previously pinned `dayour/kokoro-onnx` archive returned HTTP 404 in a new direct request. It has been removed. Upstream [kokoro-onnx 0.6.1](https://pypi.org/project/kokoro-onnx/0.6.1/) supports Python below 3.14, so speech now runs in a separate **Python 3.12** process. The Streamlit application remains on **Python 3.14**. ComfyUI keeps its own separate environment.
 
-- `requirements-app.lock`: public application packages, exact versions and SHA-256 hashes. The fresh install resolved 95 packages, including Streamlit 1.67.0. This does not upgrade an existing application environment automatically.
+- `pyproject.toml` and `uv.lock`: Python 3.14 application packages, exact locked versions and hashes, with optional test, Playwright and notebook groups. Use `uv sync --locked`; the earlier 95-package measurement predates consolidation.
 - `requirements-tts.txt`: all 16 upstream speech dependencies pinned with hashes, including Kokoro 0.6.1, ONNX Runtime 1.31.1, NumPy 2.4.6, phonemizer 3.6.0 and bundled espeakng-loader 0.2.4. No fork archive is required.
-- `requirements-tts.in`: reviewed speech input pins; comments describe lock regeneration.
 - `scripts/setup_tts.py`: creates an owned `.venv-kokoro`, installs with `--require-hashes --no-cache`, checks dependencies and downloads models only with `--download-models`. It refuses unrelated existing environments. A custom environment needs an explicit `CFC_TTS_PYTHON` path.
 - `scripts/tts_worker.py`: persistent local CPU inference through a JSON-lines protocol. ONNX Runtime telemetry is disabled before inference-session construction. Startup performs a real short synthesis, so missing phonemizer/native-library dependencies fail before footage. Inference does not download models.
 
@@ -20,11 +19,10 @@ Use Python 3.14.7 for the application. Start with a new directory for each envir
 
 ```cmd
 python -m pip install uv==0.12.19
-uv venv --python 3.14 .venv
-uv pip sync --no-cache --require-hashes --python .venv\Scripts\python.exe requirements-app.lock
+uv sync --locked
 .venv\Scripts\activate
 python scripts\setup_tts.py --download-models
-copy .env.example .env
+if not exist .env copy .env.example .env
 ffprobe -version
 python -m streamlit run streamlit_app.py
 ```

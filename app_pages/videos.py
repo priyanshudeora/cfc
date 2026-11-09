@@ -1,5 +1,6 @@
 from pathlib import Path
 import streamlit as st
+from video_agent.ui import generated_clip_panel
 from video_agent.ui import (
     service,
     current_campaign,
@@ -39,7 +40,11 @@ if state.get("status") == "complete":
             )
 
 outputs = state.get("outputs") or ([state["sample"]] if state.get("sample") else [])
+if outputs and snapshot.get("job", {}).get("status") == "failed":
+    with st.expander("AI scene progress and retained clips"):
+        generated_clip_panel(api.generation_previews(cid))
 if not outputs:
+    generated_clip_panel(api.generation_previews(cid))
     if snapshot["busy"]:
         st.info(
             "Your preview will appear here when the current job finishes. You can leave this page while it runs."
@@ -94,6 +99,7 @@ else:
                     label="Open plan & approvals",
                     icon=":material/fact_check:",
                 )
+        generated_clip_panel(result.get("visual_source", {}).get("scenes", []))
     with review:
         with st.container():
             st.subheader(result["title"])
@@ -105,14 +111,9 @@ else:
                 "Check the product, readable captions, pronunciation, music balance and ending call to action."
             )
             if snapshot["stage"] == "approve_sample":
-                cpu_batch_blocked = (
-                    state["brief"].get("generation", {}).get("batch_enabled") is False
-                    and snapshot["estimate"].get("generation_jobs", 0) > 1
-                )
-                if cpu_batch_blocked:
-                    st.warning(
-                        "Batch inference is disabled for this profile. A measured batch profile and fresh plan approval are required before creating the remaining videos."
-                    )
+                generation_blocker = snapshot.get("generation_blocker", "")
+                if generation_blocker:
+                    st.warning(generation_blocker)
                 st.caption(
                     "Approving this sample authorizes the remaining two videos within the saved plan."
                 )
@@ -129,7 +130,7 @@ else:
                     or not snapshot["approved"]
                     or not reviewed
                     or not available
-                    or cpu_batch_blocked,
+                    or bool(generation_blocker),
                     # Scope enforcement is repeated in CampaignService.act.
                     width="stretch",
                     icon=":material/task_alt:",

@@ -1,7 +1,10 @@
 @echo off
 cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" (
-    echo Create the Python 3.14 environment and install requirements-app.txt first.
+where uv >nul 2>nul
+if errorlevel 1 (
+    echo Install uv first: python -m pip install uv==0.12.19
     exit /b 1
 )
-".venv\Scripts\python.exe" -m streamlit run streamlit_app.py
+uv sync --locked
+if errorlevel 1 exit /b %errorlevel%
+uv run --locked --no-sync python -m streamlit run streamlit_app.py %*

@@ -27,7 +27,7 @@ Visual inspection confirmed the two-column desktop brief, stacked mobile fields,
 In CMD, use the project's activated environment. The report must come from an unmodified local-template run of `scripts/verify_local_demo.py`; `--output` must be a fresh directory. Existing files are never deleted.
 
 ```cmd
-python -m pip install -r requirements-ui-test.txt
+uv sync --locked --group playwright
 python scripts\prepare_ui_preview.py --report tmp\local-demo-8337413c\demo_report.json --output tmp\ui-preview-new
 set CFC_DATA_DIR=%CD%\tmp\ui-preview-new
 python -m streamlit run streamlit_app.py --server.port 8510

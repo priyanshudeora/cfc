@@ -15,15 +15,7 @@ All installs below used `--no-cache --require-hashes` and initially empty destin
 - Linux x86_64: app, 96 packages including `pexpect==4.9.0` and `ptyprocess==0.7.0`, `tmp/review-linux-app`; speech, 16 packages, `tmp/review-linux-tts`. These are cross-target package installations on Windows, not native Linux execution.
 - macOS ARM64: app, 96 packages, `tmp/review-macos-app`; speech, 16 packages, `tmp/review-macos14-tts`. The speech target requires macOS 14+. The initial macOS 13 speech attempt correctly failed because ONNX Runtime 1.31.1 has no compatible wheel for that target. These are cross-target package checks, not native macOS execution.
 
-Reproduce the Windows installation using the README commands, selecting a fresh `.venv` and an owned fresh speech environment with `scripts/setup_tts.py --environment <path>`. For cross-target dependency checks, use empty destinations:
-
-```text
-uv pip install --target tmp/linux-app-new --python-platform x86_64-unknown-linux-gnu --python-version 3.14 --require-hashes --no-cache -r requirements-app.lock
-uv pip install --target tmp/linux-tts-new --python-platform x86_64-unknown-linux-gnu --python-version 3.12 --require-hashes --no-cache -r requirements-tts.txt
-uv pip install --target tmp/macos-app-new --python-platform aarch64-apple-darwin --python-version 3.14 --require-hashes --no-cache -r requirements-app.lock
-```
-
-For the speech macOS command set `MACOSX_DEPLOYMENT_TARGET=14.0` for that command, then use `--python-platform aarch64-apple-darwin --python-version 3.12 -r requirements-tts.txt`. Restore the prior environment value afterward. [uv documents this target setting](https://docs.astral.sh/uv/reference/cli/). Linux speech wheels require glibc 2.28+ on x86_64. No native Linux/macOS host is available here; WSL is unavailable and Docker is not installed. Native setup/import/inference on those systems remains unverified.
+These are historical 7 November package-install measurements, before the dependency consolidation. For current installation use `uv sync --locked` and the separate TTS setup in README.md. Native Linux/macOS execution remains unverified.
 
 ## Cached speech with native outbound networking denied
 

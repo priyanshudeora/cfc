@@ -643,7 +643,8 @@ class ComfyFootage:
                             )
                             self._settle(task_key, cache, 0)
                             raise ValueError(
-                                "ComfyUI rejected the submitted graph; inspect the recorded validation error."
+                                "ComfyUI rejected the submitted graph: "
+                                + str(data)[:500]
                             )
                         response.raise_for_status()
                         if not data.get("prompt_id"):
@@ -662,14 +663,34 @@ class ComfyFootage:
                         if record.get("status", {}).get("status_str") == "error":
                             self._settle(task_key, cache, 1)
                             save_json(folder / "provider-error.json", record)
+                            detail = "; ".join(
+                                str(
+                                    message[1].get("exception_message")
+                                    or message[1].get("error")
+                                    or message[0]
+                                )
+                                for message in record.get("status", {}).get(
+                                    "messages", []
+                                )
+                                if isinstance(message, (list, tuple))
+                                and len(message) > 1
+                                and isinstance(message[1], dict)
+                                and message[0]
+                                in ["execution_error", "execution_interrupted"]
+                            )
+                            reason = "ComfyUI execution failed: " + (
+                                detail[:800]
+                                or "provider status=error; see provider-error.json"
+                            )
                             self.control.task_update(
                                 self.cid,
                                 task_key,
                                 "failed",
-                                error="Provider execution failed; see provider-error.json.",
+                                error=reason,
                             )
                             raise RuntimeError(
-                                "ComfyUI execution failed. Only this scene may be retried within the approved allowance."
+                                reason
+                                + ". Only this scene may be retried within the approved allowance."
                             )
                         if record.get("status", {}).get("completed"):
                             self._settle(task_key, cache, 1)
@@ -749,6 +770,11 @@ class ComfyFootage:
                                 ),
                                 settings=settings,
                                 workflow_sha256=file_hash(self.keys["COMFY_WORKFLOW"]),
+                                workflow_name=Path(self.keys["COMFY_WORKFLOW"]).name,
+                                models=[
+                                    Path(m["path"]).name
+                                    for m in self.profile()["models"]
+                                ],
                                 execution_device=self.device,
                                 elapsed_seconds=round(time.monotonic() - started, 2),
                                 probe=probe,

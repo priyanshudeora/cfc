@@ -10,7 +10,7 @@ from PIL import Image
 
 from .cache import file_hash
 from .control import AllowanceExceeded
-from .generation_contract import generation_key
+from .generation_contract import generation_key, stage_generation_issue
 from .storage import read_json
 from .usage import charge
 from .voice_setup import TTS_SETUP, tts_python, validate_voice_models
@@ -81,15 +81,12 @@ def generation_preflight(adapter, scenes, cache, brief, stage):
     generated = [s for s in scenes if s["edit"]["mode"] != "reused"]
     if not generated:
         return
+    issue = stage_generation_issue(brief, [dict(scenes=scenes)], stage, new_jobs=0)
+    if issue:
+        raise ValueError(issue)
     if brief.get("generation") != adapter.scope():
         raise ValueError(
             "Generation profile, workflow or device changed. Save and approve a fresh plan and estimate."
-        )
-    if not brief["generation"].get("batch_enabled") and (
-        len(generated) > 1 or stage == "batch"
-    ):
-        raise ValueError(
-            "This CPU/experimental profile supports one sample scene only; campaign batches are disabled. Benchmark a batch-capable profile and approve a fresh plan before continuing."
         )
     new, provider_needed = set(), False
     for scene in generated:

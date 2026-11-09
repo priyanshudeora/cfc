@@ -12,15 +12,12 @@ The supported application interpreter is **Python 3.14**, tested with **3.14.7**
 
 ```cmd
 cd /d "C:\path\to\cfc"
-python --version
-python -m venv .venv
-.venv\Scripts\activate
 python -m pip install uv==0.12.19
-uv pip sync --no-cache --require-hashes --python .venv\Scripts\python.exe requirements-app.lock
-python scripts\setup_tts.py --download-models
-copy .env.example .env
+uv sync --locked
+uv run --locked --no-sync python scripts\setup_tts.py --download-models
+if not exist .env copy .env.example .env
 ffprobe -version
-python -m streamlit run streamlit_app.py
+run_app.cmd
 ```
 
 Install [FFmpeg with FFprobe](https://ffmpeg.org/download.html) and put `ffprobe.exe` on PATH. Encoding uses the FFmpeg executable provided by `imageio-ffmpeg`, including its subtitles/ASS filters. With the environment already installed, `run_app.cmd` launches the app. The default address is `http://127.0.0.1:8501`.
@@ -31,7 +28,7 @@ Use **Settings & tools → API connections → Check local setup** for independe
 
 Local voice workers set `ORT_DISABLE_TELEMETRY=1` before Python/native ONNX Runtime initialization, and also call `disable_telemetry_events()` before creating sessions. The pinned runtime documents why the API alone can be too late for startup telemetry ([ONNX Runtime privacy](https://github.com/microsoft/onnxruntime/blob/v1.31.1/docs/Privacy.md)). Cached speech was verified in a Windows AppContainer with zero network capabilities and a native Winsock denial check. Normal workers use the telemetry opt-out; they are not automatically sandboxed. Model installation/download remains separate from inference. [Current review evidence and limitations](docs/current-review-verification.md).
 
-Both hash locks are universal and include OS-conditional dependencies (`pexpect`/`ptyprocess` outside Windows, `appnope` on macOS). Regenerate using `uv pip compile requirements-app.txt --python-version 3.14 --universal --generate-hashes -o requirements-app.lock` and the corresponding command in `requirements-tts.in`. Fresh Windows x64 environments were installed with cache disabled. Linux x86_64 and macOS ARM64 dependency trees were installed into empty cross-target directories with hash verification; those checks do not establish native execution. The pinned speech runtime requires macOS 14+ on Apple Silicon, or Linux glibc 2.28+ on x86_64. Native Linux/macOS testing remains outstanding.
+Dependency setup uses exactly **pyproject.toml**, **uv.lock** and **requirements-tts.txt**. `uv sync --locked` creates the Python 3.14 app environment with pinned, hash-checked packages. Optional groups: `uv sync --locked --group test` for pytest/Ruff, `--group playwright` for browser checks (includes tests), and `--group notebook` for JupyterLab, ipykernel and widgets. Groups may be combined. Kokoro stays in Python 3.12; its hash-locked setup and model downloads remain explicit. To update the main lock deliberately, edit pyproject.toml and run `uv lock`; ordinary launches never update the lock. The pinned speech runtime requires macOS 14+ on Apple Silicon or Linux glibc 2.28+ on x86_64; native Linux/macOS execution remains unverified.
 
 Optional API keys belong in `.env`, environment variables or Streamlit secrets. Gemini handles AI writing/revision; Tavily handles optional public-source research; ElevenLabs is an optional API voice. The app never automatically selects a paid alternative when an API/quota fails. Use **Use saved draft instead** for local recovery.
 
@@ -106,7 +103,13 @@ The helper downloads about 86 MB from the official whisper.cpp release and its m
 
 ## Optional new footage generation
 
+[Current dependency, live footage, export and browser verification](docs/dependency-and-creation-verification.md) records the 9 November run, changed files and remaining quality limitations.
+
 Creation is independent of Local draft / AI concepts planning. Choose editing, generated footage or combined creation in Campaign brief. Existing campaigns retain their editing behavior. Generated scenes upload the selected product image into an actual ComfyUI LTX latent-conditioning input before voice and FFmpeg assembly. A static product overlay is labelled compositing.
+
+**Generate new AI footage** requires model output for every planned visual scene. **Combine** generates the scenes marked for AI and edits the supplied assets in the other scenes; the concept cards list each scene's source. A sample-only profile permits a representative sample containing one AI scene, even when the other videos plan AI scenes too. A multi-scene AI sample is blocked. At sample approval, any AI scenes in the remaining videos require a separately measured batch-capable profile. UI and backend enforce the same stage rule.
+
+Video review includes **Generated clips** with raw model video, workflow/model details and original ComfyUI job IDs, including cache hits. Errors identify the required scene and reason. Completed clips remain available for Retry; switching to supplied-image animation requires an explicit scene/Creation change and fresh approval. A zero or exhausted generation allowance points to server configuration and **Review updated generation allowance**; editing an existing brief does not silently adopt server limits.
 
 Real GPU and CPU probes and a three-video generated-footage CFC export have now run. On this RTX 4050 laptop, the measured GPU profile supports small 192 x 320 clips with one inference job at a time. CPU-only generation took about 20 minutes for nine frames; CPU batch is disabled. The heavily quantized model can change product appearance. Short model clips are explicitly looped to scene duration, and human approval remains required. No native 20-second or high-resolution generation claim is made.
 
@@ -150,7 +153,8 @@ The repository excludes `.env`, uploaded product assets, campaigns, local model 
 
 ```cmd
 .venv\Scripts\activate
-python -m pip install --no-compile -r requirements-dev.txt
+uv sync --locked --group test
+.venv\Scripts\activate
 python -m pytest tests -q
 python -m pytest tests/test_ffmpeg_editor.py -q
 ```

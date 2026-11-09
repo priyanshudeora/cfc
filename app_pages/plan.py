@@ -128,19 +128,26 @@ for col, ad in zip(st.columns(3), state["plan"]["ads"]):
         st.subheader(ad["title"])
         st.markdown(ad["concept"])
         st.caption("Opening · " + ad["scenes"][0]["headline"])
+        for scene_index, scene in enumerate(ad["scenes"], 1):
+            st.caption(
+                f"Scene {scene_index}: "
+                + (
+                    "AI model footage"
+                    if scene["edit"]["mode"] != "reused"
+                    else "Supplied assets / image animation"
+                )
+            )
 
-cpu_batch_blocked = (
-    bool(generation)
-    and not generation.get("batch_enabled")
-    and snapshot["estimate"].get("generation_jobs", 0) > 1
-)
+generation_blocker = snapshot.get("generation_blocker", "")
+if generation_blocker:
+    st.warning(generation_blocker)
 if snapshot["stage"] == "approve_plan":
     if st.button(
         "Approve plan and save",
         type="primary",
         icon=":material/task_alt:",
         width="content",
-        disabled=snapshot["busy"] or cpu_batch_blocked,
+        disabled=snapshot["busy"] or bool(generation_blocker),
         key="approve_plan_" + token,
     ):
         action(api, cid, "approve", snapshot)
@@ -151,7 +158,7 @@ elif snapshot["stage"] == "ready_sample":
         icon=":material/movie:",
         width="content",
         disabled=snapshot["busy"]
-        or cpu_batch_blocked
+        or bool(generation_blocker)
         or not snapshot["approved"]
         or bool(snapshot.get("missing_assets")),
         key="generate_" + token,

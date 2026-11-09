@@ -1,6 +1,0 @@
-# Complete Python 3.14.7 notebook environment: agent, rendering, local voice and notebook UI.
-# Local voice uses the separate runtime: python scripts/setup_tts.py --download-models
--r requirements.txt
-
-# Buttons, progress bars, feedback boxes and video review inside Jupyter.
-ipywidgets>=8.1,<9

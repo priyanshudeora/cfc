@@ -180,21 +180,40 @@ class VideoRenderer(AudioMixin, VisualMixin, RenderMixin):
                 self.note(
                     "Preflight: ComfyUI profile, stage capability and available allowance"
                 )
-                generation_preflight(
-                    self.generation_adapter,
-                    stage_scenes,
-                    self.media_cache,
-                    brief,
-                    "sample" if index == 0 else "batch",
+                required = "; ".join(
+                    f"{a['title']} / scene {i + 1}"
+                    for a in stage_ads
+                    for i, s in enumerate(a["scenes"])
+                    if s["edit"]["mode"] != "reused"
                 )
+                try:
+                    generation_preflight(
+                        self.generation_adapter,
+                        stage_scenes,
+                        self.media_cache,
+                        brief,
+                        "sample" if index == 0 else "batch",
+                    )
+                except Exception as error:
+                    raise type(error)(
+                        f"Required AI scenes ({required}): {error}"
+                    ) from error
                 # Preparation happens before FFmpeg/speech cache tasks. A slow or
                 # interrupted provider poll does not exhaust parent render retries.
                 for i, scene in enumerate(generated, 1):
                     source_key = generation_key(scene, brief)
-                    self.note(f"Preparing AI footage {i}/{len(generated)}")
-                    self.generation_adapter.generate(
-                        scene, source_key, self.media_cache
+                    scene_label = f"{ad['title']} / scene {parsed.model_dump()['scenes'].index(scene) + 1}"
+                    self.note(
+                        f"Preparing AI footage {i}/{len(generated)} — {scene_label}"
                     )
+                    try:
+                        self.generation_adapter.generate(
+                            scene, source_key, self.media_cache
+                        )
+                    except Exception as error:
+                        raise type(error)(
+                            f"AI scene {scene_label}: {error}. Completed clips are retained for Retry; switching to supplied-image animation requires editing Creation/scene mode and fresh approval."
+                        ) from error
                     self.generated_records[source_key] = dict(
                         self.generation_adapter.last_result
                     )

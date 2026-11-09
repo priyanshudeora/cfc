@@ -10,6 +10,33 @@ CREATION_CHOICES = {
 }
 
 
+def stage_generation_issue(brief, ads, stage, *, new_jobs=None, remaining_jobs=None):
+    """Shared UI/backend policy for the actual stage, independent of planning."""
+    count = sum(
+        s.get("edit", {}).get("mode", "reused") != "reused"
+        for a in ads
+        for s in a["scenes"]
+    )
+    if not count:
+        return ""
+    profile = brief.get("generation")
+    if not profile:
+        return "AI footage needs COMFY_PROFILE and COMFY_WORKFLOW in .env. Run Check local setup, configure a measured profile using docs/local-generation.md, then save and approve a fresh plan."
+    if not profile.get("batch_enabled") and (stage == "batch" or count > 1):
+        return "This CPU/experimental profile supports one sample scene only; campaign batches are disabled. Use Combine with one AI scene in the representative sample, or configure a measured batch-capable COMFY_PROFILE and save and approve a fresh plan."
+    needed = count if new_jobs is None else new_jobs
+    remaining = (
+        brief.get("limits", {}).get("generation_jobs", 0)
+        if remaining_jobs is None
+        else remaining_jobs
+    )
+    if needed and remaining <= 0:
+        return "Generation-job allowance is zero or exhausted. Set a finite CFC_DEFAULT_LIMITS_JSON generation_jobs allowance on the server, then use Review updated generation allowance and approve the new estimate. No AI scene will switch to image animation automatically."
+    if needed > remaining:
+        return f"This stage needs {needed} new AI jobs but only {remaining} remain. Update the server's CFC_DEFAULT_LIMITS_JSON generation_jobs allowance, then Review updated generation allowance and approve a fresh estimate."
+    return ""
+
+
 def apply_creation(plan, brief):
     """Compile a brief choice into executable instructions, without any inference."""
     mode = brief.get("creation_mode", "edit")
@@ -74,14 +101,15 @@ def apply_creation(plan, brief):
 
 def creation_issues(plan, brief):
     issues = []
+    all_modes = [s.edit.mode for ad in plan.ads for s in ad.scenes]
+    if brief.get("creation_mode") == "combine" and (
+        all(m == "reused" for m in all_modes)
+        or all(m == "generated" for m in all_modes)
+    ):
+        issues.append(
+            "Combined creation needs generated footage and supplied-asset editing/compositing in the campaign."
+        )
     for ad in plan.ads:
-        modes = [s.edit.mode for s in ad.scenes]
-        if brief.get("creation_mode") == "combine" and (
-            all(m == "reused" for m in modes) or all(m == "generated" for m in modes)
-        ):
-            issues.append(
-                "Combined creation needs generated footage and supplied-asset editing/compositing in each video."
-            )
         for scene in ad.scenes:
             edit = scene.edit
             if edit.mode == "reused":

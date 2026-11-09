@@ -420,6 +420,43 @@ def test_cancellation_does_not_claim_running_inference_stopped(configured, monke
     assert calls["submissions"] == 1
 
 
+def test_execution_error_preserves_exact_model_reason_and_job_id(
+    configured, monkeypatch
+):
+    f = configured
+    calls = install_transport(f, monkeypatch)
+    a = f["adapter"]
+    original = a.get
+
+    def failed(route, **kwargs):
+        if route.startswith("/history/"):
+            return {
+                "known-id": dict(
+                    status=dict(
+                        status_str="error",
+                        messages=[
+                            [
+                                "execution_error",
+                                {
+                                    "exception_message": "CUDA out of memory in SamplerCustom"
+                                },
+                            ]
+                        ],
+                    )
+                )
+            }
+        return original(route, **kwargs)
+
+    monkeypatch.setattr(a, "get", failed)
+    with pytest.raises(RuntimeError, match="CUDA out of memory in SamplerCustom"):
+        a.generate(f["scene"], "model-error", f["cache"])
+    task = f["control"].task("test", "generation:model-error")
+    assert task["provider_id"] == "known-id" and task["status"] == "failed"
+    assert "CUDA out of memory" in task["error"]
+    assert calls["submissions"] == 1 and calls["downloads"] == 0
+    assert all(u["status"] == "settled" for u in f["control"].usage("test"))
+
+
 def test_higher_server_allowance_requires_a_new_plan_review(configured, tmp_path):
     from video_agent.config import Settings
     from video_agent.service import CampaignService
@@ -434,7 +471,7 @@ def test_higher_server_allowance_requires_a_new_plan_review(configured, tmp_path
         cid = make_campaign(
             api,
             creation_mode="combine",
-            limits=dict(DEFAULT_LIMITS, model_tokens=77777),
+            limits=dict(DEFAULT_LIMITS, model_tokens=77777, generation_jobs=1),
         )
         before = perform(api, cid, "approve")
         api.review_server_generation_allowance(cid, before["signature"])

@@ -151,7 +151,7 @@ else:
         with assets:
             st.markdown("**Product images**")
             st.caption(
-                "These images appear in the videos. Use clear views of the exact product."
+                "Use clear views of the exact product. Editing uses these images directly; AI creation uses them as conditioning and may change product appearance."
             )
             if not editing:
                 main = st.file_uploader(

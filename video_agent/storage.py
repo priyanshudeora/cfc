@@ -7,6 +7,7 @@ import json
 import os
 import re
 import uuid
+import time
 
 
 def now():
@@ -35,7 +36,17 @@ def save_json(path, value):
         temporary.write_text(
             json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8"
         )
-        os.replace(temporary, path)
+        for attempt in range(8):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError as error:
+                # Windows sync/indexing tools can briefly hold the destination.
+                # Keep the previous JSON intact, retry only known Windows codes,
+                # and surface permanent permissions failures after a bounded wait.
+                if getattr(error, "winerror", None) not in [5, 32, 33] or attempt == 7:
+                    raise
+                time.sleep(min(0.05 * 2**attempt, 0.5))
     finally:
         temporary.unlink(missing_ok=True)
 

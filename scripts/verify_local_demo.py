@@ -35,6 +35,11 @@ def main():
     parser.add_argument("--product", default="Trail Bottle")
     parser.add_argument("--brand", default="Summit")
     parser.add_argument("--fact", action="append", default=[])
+    parser.add_argument(
+        "--resume-exported",
+        action="store_true",
+        help="Recover this verifier's completed initial export; never resubmit its videos",
+    )
     args = parser.parse_args()
     settings = Settings(data_dir=args.output.resolve())
     for name, size in MODEL_FILES.items():
@@ -72,17 +77,25 @@ def main():
         events=[],
     )
     try:
-        cid = api.create(
-            "Local workflow verification",
-            "Young professionals",
-            "Explore the product",
-            "template",
-            product=args.product,
-            brand=args.brand,
-            claims=args.fact,
-            product_image=upload(args.main_image),
-            detail_image=upload(args.detail_image, True),
-        )
+        if args.resume_exported:
+            from video_agent.storage import read_json
+
+            report = read_json(settings.data_dir / "demo_report.json")
+            cid = report["campaign_id"]
+            assert report["status"] == "failed"
+            report["recovered_error"] = report.pop("error")
+        else:
+            cid = api.create(
+                "Local workflow verification",
+                "Young professionals",
+                "Explore the product",
+                "template",
+                product=args.product,
+                brand=args.brand,
+                claims=args.fact,
+                product_image=upload(args.main_image),
+                detail_image=upload(args.detail_image, True),
+            )
         report["campaign_id"] = cid
 
         def act(action):
@@ -98,8 +111,11 @@ def main():
                 raise RuntimeError(result["job"]["error"])
             return result
 
-        for action in ["approve", "generate", "approve", "approve"]:
-            first = act(action)
+        if args.resume_exported:
+            first = api.snapshot(cid)
+        else:
+            for action in ["approve", "generate", "approve", "approve"]:
+                first = act(action)
         if (
             first["state"]["status"] != "complete"
             or len(first["state"]["outputs"]) != 3
@@ -116,6 +132,14 @@ def main():
         api.edit_timeline(
             cid, 2, "scene 2 move product left; quieter music", first["signature"]
         )
+        draft = api.snapshot(cid)
+        assert draft["stage"] == "approve_plan" and not draft["approved"]
+        try:
+            api.act(cid, "generate", first["signature"])
+        except ValueError:
+            report["stale_generation_rejected"] = True
+        else:
+            raise AssertionError("A revision bypassed fresh plan approval")
         for action in ["approve", "generate", "approve", "approve"]:
             revised = act(action)
         outputs = revised["state"]["outputs"]
