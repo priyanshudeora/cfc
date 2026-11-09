@@ -25,6 +25,14 @@ from .control import DEFAULT_LIMITS
 
 
 class Planner:
+    def gemini_key(self):
+        key = (self.keys.get("GEMINI_API_KEY") or "").strip()
+        if not key:
+            raise ValueError(
+                "GEMINI_API_KEY is missing. Add it to .env or Streamlit secrets and reload the app to use AI planning/revisions. Your saved draft is retained; use Use saved draft instead or edit the plan manually."
+            )
+        return key
+
     def __init__(self, folder, keys, assets, note, model="gemini-2.5-flash"):
         self.folder = Path(folder)
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -34,9 +42,7 @@ class Planner:
         self.control, self.cid = None, self.folder.name
 
     def gemini_request(self, payload):
-        key = self.keys.get("GEMINI_API_KEY") or ""
-        if not key:
-            raise ValueError("Gemini API key missing")
+        key = self.gemini_key()
         return api_json(
             "Gemini",
             "POST",
@@ -108,6 +114,7 @@ class Planner:
         )
         if cache.exists():
             return schema.model_validate(read_json(cache)["parsed"])
+        self.gemini_key()  # Fail before task creation/reservation if nothing can be sent.
         payload_input = self.planning_input(prompt, schema)
         if isinstance(payload_input, list):
             for analysis in brief.get("input_analysis", []):
@@ -295,20 +302,17 @@ class Planner:
     def check_model_access(self, model):
         import re
 
+        key = self.gemini_key()
         if not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", model):
             raise ValueError("Use a Gemini model ID, not a URL.")
-        path = self.cache_dir / (
-            "model-access-"
-            + digest([model, self.keys.get("GEMINI_API_KEY", "")])
-            + ".json"
-        )
+        path = self.cache_dir / ("model-access-" + digest([model, key]) + ".json")
         if path.exists() and time.time() - path.stat().st_mtime < 3600:
             return read_json(path)
         result = api_json(
             "Gemini model access",
             "GET",
             "https://generativelanguage.googleapis.com/v1beta/models/" + model,
-            headers={"x-goog-api-key": self.keys.get("GEMINI_API_KEY", "")},
+            headers={"x-goog-api-key": key},
         )
         save_json(path, result)
         return result

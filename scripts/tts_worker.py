@@ -4,6 +4,11 @@ Only local files and CPU inference are used. Stdout is reserved for the protocol
 """
 
 import contextlib
+import os
+
+# Must precede ANY native ORT initialization, including import-time startup.
+# disable_telemetry_events() alone cannot suppress the 1DS initialization event.
+os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 import json
 from pathlib import Path
 import sys
@@ -43,6 +48,7 @@ def main():
                 python=sys.version.split()[0],
                 kokoro_onnx=version("kokoro-onnx"),
                 onnxruntime=ort.__version__,
+                telemetry_opt_out=os.environ["ORT_DISABLE_TELEMETRY"],
             )
         )
     except Exception as error:

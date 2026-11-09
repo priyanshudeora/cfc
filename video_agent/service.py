@@ -967,9 +967,9 @@ class CampaignService:
         current = self.snapshot(cid)
         if current["busy"] or current["signature"] != expected_signature:
             raise ValueError("Wait for work to finish and refresh the draft.")
-        if current["stage"] != "plan":
+        if current["stage"] not in ["plan", "revise_sample", "revise_selected"]:
             raise ValueError(
-                "A saved draft can replace only an interrupted planning step."
+                "A saved draft can replace only an interrupted planning or AI revision step."
             )
         state = current["state"]
         plan = state.get("plan") or template_plan(state["brief"])

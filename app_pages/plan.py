@@ -20,7 +20,10 @@ state, token = snapshot["state"], snapshot["signature"]
 stage_banner(snapshot)
 activity(cid)
 fact_review_panel(api, cid, snapshot)
-if snapshot["stage"] == "plan" and not snapshot["busy"]:
+if (
+    snapshot["stage"] in ["plan", "revise_sample", "revise_selected"]
+    and not snapshot["busy"]
+):
     if st.button(
         "Use saved draft instead", icon=":material/history:", key="saved_draft_" + cid
     ):

@@ -1,6 +1,7 @@
 """Conservative product-independent factual copy checks and number normalization."""
 
 import re
+import unicodedata
 
 SMALL = dict(
     zip(
@@ -44,9 +45,76 @@ SAFE_COPY = {
 
 
 def normalized(text):
+    # Preserve meaning-bearing symbols before case folding/tokenization. Never
+    # erase a currency, denominator, exponent, temperature scale or SI prefix.
+    # Canonicalize spellings, not physical conversions or currency exchanges.
+    for pattern, replacement in [
+        (r"\bmillimet(?:er|re)s?\b", "mm"),
+        (r"\bmillilit(?:er|re)s?\b", "ml"),
+        (r"\blit(?:er|re)s?\b", "l"),
+    ]:
+        text = re.sub(pattern, replacement, text, flags=re.I)
+    text = text.replace("µ", "μ").replace("℃", "°C").replace("℉", "°F")
+    text = re.sub(
+        r"(?<![A-Za-z])([μmckMG]?)[lL](?![A-Za-z])", lambda m: m[1] + "l", text
+    )
+    currency = {
+        "₹": "currencyinr",
+        "$": "currencydollar",
+        "€": "currencyeur",
+        "£": "currencygbp",
+        "¥": "currencyyenoryuan",
+    }
+    text = re.sub(r"US\$", " currencyusd ", text, flags=re.I)
+    for symbol, token in currency.items():
+        text = text.replace(symbol, " " + token + " ")
+    text = re.sub(r"\b(?:INR|rupees?|Rs\.?)\b", "currencyinr", text, flags=re.I)
+    text = re.sub(r"\b(?:USD|US dollars?)\b", "currencyusd", text, flags=re.I)
+    text = re.sub(r"\b(?:EUR|euros?)\b", "currencyeur", text, flags=re.I)
+    text = re.sub(r"\bGBP\b", "currencygbp", text, flags=re.I)
+    # All other currency symbols remain distinct, including uncommon currencies.
+    text = "".join(
+        " currencycode" + str(ord(c)) + " " if unicodedata.category(c) == "Sc" else c
+        for c in text
+    )
+
+    def unit(match):
+        value = match.group(0)
+        if value == "A" and not re.search(
+            r"(?:\d|\b(?:" + "|".join(SMALL | TENS) + r"|hundred|thousand))\s*$",
+            text[: match.start()],
+            re.I,
+        ):
+            return value  # English article, not a measured ampere value.
+        # Encode original case instead of conflating mW/MW, MB/Mb, etc.
+        return (
+            " unitcase"
+            + "".join(chr(97 + int(c, 16)) for c in value.encode().hex())
+            + " "
+        )
+
+    text = re.sub(
+        r"(?<![A-Za-z])(?:[pnμmcduhkMGT]?(?:Ah|Wh|Hz|Pa|[AVWJNFΩSBb])|[μmckMGT]?g|[μncmkMG]?m|[μmckMG]?l|[μmnkMG]?s)(?![A-Za-z])",
+        unit,
+        text,
+    )
+    text = text.translate(
+        str.maketrans(
+            {
+                "²": " power2 ",
+                "³": " power3 ",
+                "⁻": " exponentnegative ",
+                "°": " degree ",
+                "/": " per ",
+                "^": " power ",
+                "×": " times ",
+                "‰": " permille ",
+            }
+        )
+    )
     text = re.sub(r"(?<!\w)[−-](?=\d)", "negative ", text.casefold())
     words = re.findall(
-        r"\d+(?:\.\d+)?|[+<>≥≤±%]|[^\W\d_]+", text.replace("-", " "), re.UNICODE
+        r"\d+(?:\.\d+)?|[+<>≥≤±%=≠]|[^\W\d_]+", text.replace("-", " "), re.UNICODE
     )
     out, i = [], 0
     while i < len(words):

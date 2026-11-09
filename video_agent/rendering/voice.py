@@ -12,6 +12,7 @@ import atexit
 import json
 import queue
 import tempfile
+import os
 from ..config import ROOT
 from ..voice_setup import tts_python, TTS_SETUP, validate_voice_models
 
@@ -30,6 +31,7 @@ class IsolatedKokoro:
             stderr=subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
+            env=dict(os.environ, ORT_DISABLE_TELEMETRY="1"),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
@@ -140,6 +142,7 @@ def local_voice(model_dir, keys=None):
 
 @lru_cache(maxsize=1)
 def load_kokoro(model_dir):
+    os.environ["ORT_DISABLE_TELEMETRY"] = "1"
     import onnxruntime as ort
 
     # Use the supported ORT API before constructing any inference sessions.
